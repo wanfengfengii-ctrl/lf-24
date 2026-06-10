@@ -117,9 +117,6 @@ function handleObjectsUpdated() {
 onMounted(() => {
   if (solutionStore.solutions.length === 0) {
     solutionStore.createNewSolution('默认方案')
-    solutionStore.addLayer('background', '底色层 1')
-    solutionStore.addLayer('pattern', '纹样层 1')
-    solutionStore.addLayer('outline', '描边层 1')
   }
 })
 </script>

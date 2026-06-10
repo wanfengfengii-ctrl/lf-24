@@ -53,6 +53,8 @@ const currentColor = ref('#3b82f6')
 const brushWidth = ref(10)
 const isDrawing = ref(false)
 const drawingPath = ref<any[]>([])
+const drawingStartPoint = ref<{ x: number; y: number } | null>(null)
+const drawingPreview = ref<any>(null)
 
 function initCanvas() {
   if (!canvasRef.value) return
@@ -201,7 +203,42 @@ function handleMouseDown(options: any) {
   if (!pointer) return
 
   isDrawing.value = true
-  drawingPath.value = [new fabric.Point(pointer.x, pointer.y)]
+  drawingStartPoint.value = { x: pointer.x, y: pointer.y }
+
+  if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
+    drawingPath.value = [new fabric.Point(pointer.x, pointer.y)]
+  } else if (currentTool.value === 'rect') {
+    drawingPreview.value = new fabric.Rect({
+      left: pointer.x,
+      top: pointer.y,
+      width: 0,
+      height: 0,
+      fill: currentColor.value,
+      stroke: currentColor.value,
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+      opacity: 0.6,
+      data: { layerId: activeLayer.value.id }
+    })
+    fabricCanvas.value.add(drawingPreview.value)
+  } else if (currentTool.value === 'circle') {
+    drawingPreview.value = new fabric.Circle({
+      left: pointer.x,
+      top: pointer.y,
+      radius: 0,
+      fill: currentColor.value,
+      stroke: currentColor.value,
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+      opacity: 0.6,
+      data: { layerId: activeLayer.value.id }
+    })
+    fabricCanvas.value.add(drawingPreview.value)
+  }
+
+  fabricCanvas.value?.renderAll()
 }
 
 function getPointer(e: any) {
@@ -223,7 +260,35 @@ function handleMouseMove(options: any) {
   const pointer = getPointer(options.e)
   if (!pointer) return
 
-  drawingPath.value.push(new fabric.Point(pointer.x, pointer.y))
+  if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
+    drawingPath.value.push(new fabric.Point(pointer.x, pointer.y))
+  } else if (currentTool.value === 'rect' && drawingPreview.value && drawingStartPoint.value) {
+    const startX = drawingStartPoint.value.x
+    const startY = drawingStartPoint.value.y
+    const width = pointer.x - startX
+    const height = pointer.y - startY
+
+    drawingPreview.value.set({
+      left: width >= 0 ? startX : pointer.x,
+      top: height >= 0 ? startY : pointer.y,
+      width: Math.abs(width),
+      height: Math.abs(height)
+    })
+    fabricCanvas.value.renderAll()
+  } else if (currentTool.value === 'circle' && drawingPreview.value && drawingStartPoint.value) {
+    const startX = drawingStartPoint.value.x
+    const startY = drawingStartPoint.value.y
+    const dx = pointer.x - startX
+    const dy = pointer.y - startY
+    const radius = Math.sqrt(dx * dx + dy * dy)
+
+    drawingPreview.value.set({
+      left: startX - radius,
+      top: startY - radius,
+      radius: radius
+    })
+    fabricCanvas.value.renderAll()
+  }
 }
 
 function handleMouseUp() {
@@ -232,33 +297,80 @@ function handleMouseUp() {
 
   isDrawing.value = false
 
-  if (drawingPath.value.length < 2) {
-    drawingPath.value = []
-    return
+  if (drawingPreview.value) {
+    fabricCanvas.value.remove(drawingPreview.value)
   }
 
-  const pathData = pointsToPath(drawingPath.value)
-  const path = new fabric.Path(pathData, {
-    stroke: currentColor.value,
-    strokeWidth: brushWidth.value,
-    fill: currentTool.value === 'brush' ? 'none' : currentColor.value,
-    selectable: true,
-    data: { layerId: activeLayer.value.id }
-  })
+  let newShape: any = null
 
-  if (currentTool.value === 'eraser') {
-    path.set({
-      stroke: '#ffffff',
-      strokeWidth: brushWidth.value * 2,
-      globalCompositeOperation: 'destination-out'
+  if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
+    if (drawingPath.value.length < 2) {
+      drawingPath.value = []
+      drawingPreview.value = null
+      drawingStartPoint.value = null
+      return
+    }
+
+    const pathData = pointsToPath(drawingPath.value)
+    newShape = new fabric.Path(pathData, {
+      stroke: currentColor.value,
+      strokeWidth: brushWidth.value,
+      fill: currentTool.value === 'brush' ? 'none' : currentColor.value,
+      selectable: true,
+      data: { layerId: activeLayer.value.id }
     })
+
+    if (currentTool.value === 'eraser') {
+      newShape.set({
+        stroke: '#ffffff',
+        strokeWidth: brushWidth.value * 2,
+        globalCompositeOperation: 'destination-out'
+      })
+    }
+  } else if (currentTool.value === 'rect' && drawingPreview.value && drawingStartPoint.value) {
+    const width = drawingPreview.value.width || 0
+    const height = drawingPreview.value.height || 0
+    const left = drawingPreview.value.left || 0
+    const top = drawingPreview.value.top || 0
+
+    if (width > 2 && height > 2) {
+      newShape = new fabric.Rect({
+        left,
+        top,
+        width,
+        height,
+        fill: currentColor.value,
+        selectable: true,
+        data: { layerId: activeLayer.value.id }
+      })
+    }
+  } else if (currentTool.value === 'circle' && drawingPreview.value && drawingStartPoint.value) {
+    const radius = drawingPreview.value.radius || 0
+    const left = drawingPreview.value.left || 0
+    const top = drawingPreview.value.top || 0
+
+    if (radius > 2) {
+      newShape = new fabric.Circle({
+        left,
+        top,
+        radius,
+        fill: currentColor.value,
+        selectable: true,
+        data: { layerId: activeLayer.value.id }
+      })
+    }
   }
 
-  fabricCanvas.value?.add(path)
-  fabricCanvas.value?.renderAll()
+  if (newShape) {
+    fabricCanvas.value?.add(newShape)
+    fabricCanvas.value?.setActiveObject(newShape)
+    fabricCanvas.value?.renderAll()
+    saveActiveLayerObjects()
+  }
 
-  saveActiveLayerObjects()
   drawingPath.value = []
+  drawingPreview.value = null
+  drawingStartPoint.value = null
 }
 
 function pointsToPath(points: any[]): string {

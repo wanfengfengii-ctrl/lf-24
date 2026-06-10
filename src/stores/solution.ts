@@ -46,6 +46,30 @@ export const useSolutionStore = defineStore('solution', () => {
     }
     solutions.value.push(solution)
     currentSolutionId.value = solution.id
+
+    const defaultLayers: Array<{ type: LayerType; name: string }> = [
+      { type: 'background', name: '底色层 1' },
+      { type: 'pattern', name: '纹样层 1' },
+      { type: 'outline', name: '描边层 1' }
+    ]
+    defaultLayers.forEach((layer, index) => {
+      const newLayer: Layer = {
+        id: generateId(),
+        name: layer.name,
+        type: layer.type,
+        visible: true,
+        opacity: 100,
+        objects: [],
+        zIndex: index
+      }
+      solution.layers.push(newLayer)
+    })
+
+    if (solution.layers.length > 0) {
+      const sorted = [...solution.layers].sort((a, b) => a.zIndex - b.zIndex)
+      activeLayerId.value = sorted[sorted.length - 1].id
+    }
+
     return solution
   }
 
@@ -54,7 +78,8 @@ export const useSolutionStore = defineStore('solution', () => {
     if (solution) {
       currentSolutionId.value = solutionId
       if (solution.layers.length > 0) {
-        activeLayerId.value = solution.layers[solution.layers.length - 1].id
+        const sorted = [...solution.layers].sort((a, b) => a.zIndex - b.zIndex)
+        activeLayerId.value = sorted[sorted.length - 1].id
       } else {
         activeLayerId.value = null
       }
