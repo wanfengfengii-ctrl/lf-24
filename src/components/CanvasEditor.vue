@@ -20,24 +20,42 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
-import { useDialog, NEmpty, NButton } from 'naive-ui'
+import { useDialog, useMessage, NEmpty, NButton } from 'naive-ui'
 import * as fabric from 'fabric'
 import { useSolutionStore } from '../stores/solution'
+import { useDiseaseStore } from '../stores/disease'
 import { storeToRefs } from 'pinia'
+import type { DiseasePoint, DiseaseType, DiseaseSeverity } from '../types'
+import { DISEASE_TYPE_COLORS } from '../types'
 
 const props = defineProps<{
   canvasId: string
   readOnly?: boolean
   enablePeriodFilter?: boolean
+  enableDiseaseMode?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'objects-updated'): void
+  (e: 'disease-created', diseaseId: string): void
+  (e: 'disease-selected', diseaseId: string | null): void
 }>()
 
 const solutionStore = useSolutionStore()
 const { currentSolution, activeLayer, sortedLayers, visibleLayers, visibleFilteredLayers, selectedPeriodIds, activePeriodId } = storeToRefs(solutionStore)
+const diseaseStore = useDiseaseStore()
+const {
+  diseases,
+  selectedDiseaseId,
+  isDrawingDisease,
+  drawingShapeType,
+  drawingPoints,
+  diseaseVisible,
+  filterType,
+  filterSeverity
+} = storeToRefs(diseaseStore)
 const dialog = useDialog()
+const message = useMessage()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -56,6 +74,12 @@ const isDrawing = ref(false)
 const drawingPath = ref<any[]>([])
 const drawingStartPoint = ref<{ x: number; y: number } | null>(null)
 const drawingPreview = ref<any>(null)
+
+const diseaseDrawingStartPoint = ref<{ x: number; y: number } | null>(null)
+const diseaseDrawingPreview = ref<any>(null)
+const currentDiseaseType = ref<DiseaseType>('fading')
+const currentDiseaseSeverity = ref<DiseaseSeverity>('mild')
+const diseaseObjects = ref<any[]>([])
 
 function initCanvas() {
   if (!canvasRef.value) return
@@ -179,8 +203,84 @@ function renderAllLayers() {
     fabricCanvas.value.sendObjectToBack(lineArtImage.value)
   }
 
+  if (props.enableDiseaseMode && diseaseVisible.value) {
+    renderDiseases()
+  }
+
   fabricCanvas.value.renderAll()
   isUpdating.value = false
+}
+
+function getFilteredDiseases() {
+  return diseases.value.filter(d => {
+    if (filterType.value !== 'all' && d.type !== filterType.value) return false
+    if (filterSeverity.value !== 'all' && d.severity !== filterSeverity.value) return false
+    return true
+  })
+}
+
+function renderDiseases() {
+  if (!fabricCanvas.value) return
+
+  const filteredDiseases = getFilteredDiseases()
+  diseaseObjects.value = []
+
+  for (const disease of filteredDiseases) {
+    try {
+      let fabricObj: any = null
+
+      if (disease.shapeType === 'rect') {
+        const { left, top, width, height } = disease.boundingBox
+        fabricObj = new fabric.Rect({
+          left,
+          top,
+          width,
+          height,
+          fill: disease.color + '30',
+          stroke: disease.color,
+          strokeWidth: 2,
+          selectable: !props.readOnly,
+          evented: !props.readOnly,
+          data: { diseaseId: disease.id, isDisease: true }
+        })
+      } else if (disease.shapeType === 'polygon' || disease.shapeType === 'freehand') {
+        const points = disease.points.map(p => new fabric.Point(p.x, p.y))
+        fabricObj = new fabric.Polygon(points, {
+          fill: disease.color + '30',
+          stroke: disease.color,
+          strokeWidth: 2,
+          selectable: !props.readOnly,
+          evented: !props.readOnly
+        })
+        ;(fabricObj as any).data = { diseaseId: disease.id, isDisease: true }
+      }
+
+      if (fabricObj) {
+        if (disease.id === selectedDiseaseId.value) {
+          fabricObj.set({
+            strokeWidth: 3,
+            stroke: '#1677ff'
+          })
+        }
+        fabricCanvas.value.add(fabricObj)
+        diseaseObjects.value.push(fabricObj)
+
+        const labelText = new fabric.IText(disease.name, {
+          left: disease.boundingBox.left,
+          top: disease.boundingBox.top - 20,
+          fontSize: 12,
+          fill: disease.color,
+          backgroundColor: '#ffffff',
+          selectable: false,
+          evented: false,
+          data: { diseaseId: disease.id, isDiseaseLabel: true }
+        })
+        fabricCanvas.value.add(labelText)
+      }
+    } catch (e) {
+      console.error('Failed to render disease:', e)
+    }
+  }
 }
 
 function createFabricObjectFromData(data: any): any {
@@ -220,11 +320,18 @@ function handlePathCreated() {
 }
 
 function handleMouseDown(options: any) {
-  if (props.readOnly || !activeLayer.value) return
-  if (currentTool.value === 'select') return
+  if (props.readOnly) return
 
   const pointer = getPointer(options.e)
   if (!pointer) return
+
+  if (props.enableDiseaseMode) {
+    handleDiseaseMouseDown(pointer)
+    return
+  }
+
+  if (!activeLayer.value) return
+  if (currentTool.value === 'select') return
 
   isDrawing.value = true
   drawingStartPoint.value = { x: pointer.x, y: pointer.y }
@@ -265,6 +372,70 @@ function handleMouseDown(options: any) {
   fabricCanvas.value?.renderAll()
 }
 
+function handleDiseaseMouseDown(pointer: { x: number; y: number }) {
+  if (!isDrawingDisease.value) {
+    const target = findDiseaseAtPoint(pointer)
+    if (target) {
+      diseaseStore.selectDisease(target.data.diseaseId)
+      emit('disease-selected', target.data.diseaseId)
+    } else {
+      diseaseStore.selectDisease(null)
+      emit('disease-selected', null)
+    }
+    return
+  }
+
+  diseaseDrawingStartPoint.value = { x: pointer.x, y: pointer.y }
+  diseaseStore.addDrawingPoint({ x: pointer.x, y: pointer.y })
+
+  const color = DISEASE_TYPE_COLORS[currentDiseaseType.value]
+
+  if (drawingShapeType.value === 'rect') {
+    diseaseDrawingPreview.value = new fabric.Rect({
+      left: pointer.x,
+      top: pointer.y,
+      width: 0,
+      height: 0,
+      fill: color + '30',
+      stroke: color,
+      strokeWidth: 2,
+      selectable: false,
+      evented: false,
+      data: { isDiseasePreview: true }
+    })
+    fabricCanvas.value.add(diseaseDrawingPreview.value)
+  } else if (drawingShapeType.value === 'polygon') {
+    diseaseDrawingPreview.value = new fabric.Polygon(
+      [new fabric.Point(pointer.x, pointer.y)],
+      {
+        fill: color + '30',
+        stroke: color,
+        strokeWidth: 2,
+        selectable: false,
+        evented: false
+      }
+    )
+    ;(diseaseDrawingPreview.value as any).data = { isDiseasePreview: true }
+    fabricCanvas.value.add(diseaseDrawingPreview.value)
+  }
+
+  fabricCanvas.value?.renderAll()
+}
+
+function findDiseaseAtPoint(pointer: { x: number; y: number }): any | null {
+  if (!fabricCanvas.value) return null
+  const objects = fabricCanvas.value.getObjects()
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i]
+    if (obj.data?.isDisease) {
+      if (obj.containsPoint?.(new fabric.Point(pointer.x, pointer.y))) {
+        return obj
+      }
+    }
+  }
+  return null
+}
+
 function getPointer(e: any) {
   if (fabricCanvas.value.getViewportTransform) {
     return fabricCanvas.value.getPointer(e)
@@ -278,11 +449,18 @@ function getPointer(e: any) {
 }
 
 function handleMouseMove(options: any) {
-  if (!isDrawing.value || !activeLayer.value || props.readOnly) return
-  if (currentTool.value === 'select') return
+  if (props.readOnly) return
 
   const pointer = getPointer(options.e)
   if (!pointer) return
+
+  if (props.enableDiseaseMode && isDrawingDisease.value) {
+    handleDiseaseMouseMove(pointer)
+    return
+  }
+
+  if (!isDrawing.value || !activeLayer.value) return
+  if (currentTool.value === 'select') return
 
   if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
     drawingPath.value.push(new fabric.Point(pointer.x, pointer.y))
@@ -315,8 +493,39 @@ function handleMouseMove(options: any) {
   }
 }
 
+function handleDiseaseMouseMove(pointer: { x: number; y: number }) {
+  if (!diseaseDrawingPreview.value || !diseaseDrawingStartPoint.value) return
+
+  if (drawingShapeType.value === 'rect') {
+    const startX = diseaseDrawingStartPoint.value.x
+    const startY = diseaseDrawingStartPoint.value.y
+    const width = pointer.x - startX
+    const height = pointer.y - startY
+
+    diseaseDrawingPreview.value.set({
+      left: width >= 0 ? startX : pointer.x,
+      top: height >= 0 ? startY : pointer.y,
+      width: Math.abs(width),
+      height: Math.abs(height)
+    })
+  } else if (drawingShapeType.value === 'polygon') {
+    const points = [...drawingPoints.value, { x: pointer.x, y: pointer.y }]
+    const fabricPoints = points.map(p => new fabric.Point(p.x, p.y))
+    diseaseDrawingPreview.value.set({ points: fabricPoints })
+  }
+
+  fabricCanvas.value?.renderAll()
+}
+
 function handleMouseUp() {
-  if (!isDrawing.value || !activeLayer.value || props.readOnly) return
+  if (props.readOnly) return
+
+  if (props.enableDiseaseMode && isDrawingDisease.value) {
+    handleDiseaseMouseUp()
+    return
+  }
+
+  if (!isDrawing.value || !activeLayer.value) return
   if (currentTool.value === 'select') return
 
   isDrawing.value = false
@@ -395,6 +604,58 @@ function handleMouseUp() {
   drawingPath.value = []
   drawingPreview.value = null
   drawingStartPoint.value = null
+}
+
+function handleDiseaseMouseUp() {
+  if (!isDrawingDisease.value) return
+
+  if (diseaseDrawingPreview.value) {
+    fabricCanvas.value.remove(diseaseDrawingPreview.value)
+  }
+
+  if (drawingShapeType.value === 'rect' && diseaseDrawingStartPoint.value) {
+    const preview = diseaseDrawingPreview.value
+    if (preview && (preview.width > 5 || preview.height > 5)) {
+      const points: DiseasePoint[] = [
+        { x: preview.left, y: preview.top },
+        { x: preview.left + preview.width, y: preview.top + preview.height }
+      ]
+      finishDiseaseDrawing(points)
+    } else {
+      diseaseStore.cancelDrawing()
+    }
+  } else if (drawingShapeType.value === 'polygon') {
+    if (drawingPoints.value.length >= 3) {
+      finishDiseaseDrawing([...drawingPoints.value])
+    } else {
+      diseaseStore.cancelDrawing()
+      message.warning('多边形至少需要3个点')
+    }
+  }
+
+  diseaseDrawingPreview.value = null
+  diseaseDrawingStartPoint.value = null
+  renderAllLayers()
+}
+
+function finishDiseaseDrawing(points: DiseasePoint[]) {
+  const disease = diseaseStore.finishDrawing(
+    currentDiseaseType.value,
+    currentDiseaseSeverity.value,
+    points
+  )
+  if (disease) {
+    emit('disease-created', disease.id)
+    message.success('病害标注已添加')
+  }
+}
+
+function setDiseaseType(type: DiseaseType) {
+  currentDiseaseType.value = type
+}
+
+function setDiseaseSeverity(severity: DiseaseSeverity) {
+  currentDiseaseSeverity.value = severity
 }
 
 function pointsToPath(points: any[]): string {
@@ -533,6 +794,42 @@ watch(activePeriodId, () => {
   }
 })
 
+watch(() => props.enableDiseaseMode, () => {
+  if (fabricCanvas.value) {
+    renderAllLayers()
+  }
+})
+
+watch(diseaseVisible, () => {
+  if (props.enableDiseaseMode && fabricCanvas.value) {
+    renderAllLayers()
+  }
+})
+
+watch(diseases, () => {
+  if (props.enableDiseaseMode && fabricCanvas.value) {
+    renderAllLayers()
+  }
+}, { deep: true })
+
+watch(selectedDiseaseId, () => {
+  if (props.enableDiseaseMode && fabricCanvas.value) {
+    renderAllLayers()
+  }
+})
+
+watch(filterType, () => {
+  if (props.enableDiseaseMode && fabricCanvas.value) {
+    renderAllLayers()
+  }
+})
+
+watch(filterSeverity, () => {
+  if (props.enableDiseaseMode && fabricCanvas.value) {
+    renderAllLayers()
+  }
+})
+
 onMounted(() => {
   nextTick(() => {
     initCanvas()
@@ -552,7 +849,9 @@ defineExpose({
   clearActiveLayer,
   deleteSelected,
   triggerImport,
-  fabricCanvas
+  fabricCanvas,
+  setDiseaseType,
+  setDiseaseSeverity
 })
 </script>
 

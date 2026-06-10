@@ -50,6 +50,7 @@ export interface Solution {
   canvasHeight: number
   historicalPeriods: HistoricalPeriod[]
   selectedPeriodIds: string[]
+  diseases: DiseaseAnnotation[]
 }
 
 export interface ColorAreaStat {
@@ -96,6 +97,90 @@ export interface RestorationReport {
   }>
   overallStats: ColorAreaStat[]
   overallTotalArea: number
+}
+
+export type DiseaseType = 'fading' | 'peeling' | 'crack' | 'stain' | 'other'
+
+export type DiseaseSeverity = 'mild' | 'moderate' | 'severe'
+
+export interface DiseasePoint {
+  x: number
+  y: number
+}
+
+export interface DiseaseAnnotation {
+  id: string
+  name: string
+  type: DiseaseType
+  severity: DiseaseSeverity
+  description: string
+  discoveredAt: number
+  treatmentSuggestion: string
+  shapeType: 'rect' | 'polygon' | 'freehand'
+  points: DiseasePoint[]
+  boundingBox: {
+    left: number
+    top: number
+    width: number
+    height: number
+  }
+  area: number
+  color: string
+}
+
+export interface DiseaseTypeStat {
+  type: DiseaseType
+  typeName: string
+  count: number
+  totalArea: number
+  percentage: number
+  color: string
+}
+
+export interface DiseaseSeverityStat {
+  severity: DiseaseSeverity
+  severityName: string
+  count: number
+  totalArea: number
+  percentage: number
+}
+
+export interface DiseaseReport {
+  solutionName: string
+  generatedAt: number
+  totalDiseases: number
+  totalArea: number
+  typeStats: DiseaseTypeStat[]
+  severityStats: DiseaseSeverityStat[]
+  diseases: DiseaseAnnotation[]
+}
+
+export const DISEASE_TYPE_LABELS: Record<DiseaseType, string> = {
+  fading: '褪色',
+  peeling: '剥落',
+  crack: '裂缝',
+  stain: '污损',
+  other: '其他'
+}
+
+export const DISEASE_TYPE_COLORS: Record<DiseaseType, string> = {
+  fading: '#f59e0b',
+  peeling: '#ef4444',
+  crack: '#8b5cf6',
+  stain: '#6b7280',
+  other: '#10b981'
+}
+
+export const DISEASE_SEVERITY_LABELS: Record<DiseaseSeverity, string> = {
+  mild: '轻微',
+  moderate: '中等',
+  severe: '严重'
+}
+
+export const DISEASE_SEVERITY_COLORS: Record<DiseaseSeverity, string> = {
+  mild: '#22c55e',
+  moderate: '#f59e0b',
+  severe: '#ef4444'
 }
 
 export const DEFAULT_HISTORICAL_PERIODS: Omit<HistoricalPeriod, 'id'>[] = [

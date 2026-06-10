@@ -11,6 +11,16 @@
             <div class="header-info">
               <n-space>
                 <n-tag
+                  :type="diseaseMode ? 'warning' : 'default'"
+                  @click="toggleDiseaseMode"
+                  style="cursor: pointer"
+                >
+                  <template #icon>
+                    <n-icon><bug-outline /></n-icon>
+                  </template>
+                  {{ diseaseMode ? '病害标注模式' : '病害标注' }}
+                </n-tag>
+                <n-tag
                   :type="historyMode ? 'primary' : 'default'"
                   @click="historyMode = !historyMode"
                   style="cursor: pointer"
@@ -28,8 +38,15 @@
           </header>
 
           <main class="app-main">
-            <aside class="sidebar left-sidebar" :class="{ 'history-mode': historyMode }">
-              <template v-if="!historyMode">
+            <aside class="sidebar left-sidebar" :class="{ 'history-mode': historyMode, 'disease-mode': diseaseMode }">
+              <template v-if="diseaseMode">
+                <DiseasePanel
+                  @start-drawing="handleStartDiseaseDrawing"
+                  @cancel-drawing="handleCancelDiseaseDrawing"
+                  @select-disease="handleSelectDisease"
+                />
+              </template>
+              <template v-else-if="!historyMode">
                 <SolutionPanel @open-compare="showCompare = true" />
               </template>
               <template v-else>
@@ -55,16 +72,26 @@
                   ref="canvasEditorRef"
                   canvas-id="main-canvas"
                   :enable-period-filter="historyMode"
+                  :enable-disease-mode="diseaseMode"
                   @objects-updated="handleObjectsUpdated"
+                  @disease-created="handleDiseaseCreated"
+                  @disease-selected="handleDiseaseSelected"
                 />
               </div>
             </section>
 
             <aside class="sidebar right-sidebar">
-              <LayerPanel />
-              <div class="stats-container">
-                <ColorStatsPanel :enable-period-filter="historyMode" />
-              </div>
+              <template v-if="diseaseMode">
+                <div class="disease-stats-wrapper">
+                  <DiseaseStatsPanel />
+                </div>
+              </template>
+              <template v-else>
+                <LayerPanel />
+                <div class="stats-container">
+                  <ColorStatsPanel :enable-period-filter="historyMode" />
+                </div>
+              </template>
             </aside>
           </main>
 
@@ -85,7 +112,7 @@ import {
   NTag,
   NIcon
 } from 'naive-ui'
-import { TimeOutline } from '@vicons/ionicons5'
+import { TimeOutline, BugOutline } from '@vicons/ionicons5'
 import { useSolutionStore } from './stores/solution'
 import { storeToRefs } from 'pinia'
 import CanvasEditor from './components/CanvasEditor.vue'
@@ -96,13 +123,18 @@ import ColorStatsPanel from './components/ColorStatsPanel.vue'
 import CompareView from './components/CompareView.vue'
 import TimelinePanel from './components/TimelinePanel.vue'
 import HistoryDeductionPanel from './components/HistoryDeductionPanel.vue'
+import DiseasePanel from './components/DiseasePanel.vue'
+import DiseaseStatsPanel from './components/DiseaseStatsPanel.vue'
+import { useDiseaseStore } from './stores/disease'
 
 const solutionStore = useSolutionStore()
+const diseaseStore = useDiseaseStore()
 const { currentSolution } = storeToRefs(solutionStore)
 
 const canvasEditorRef = ref<InstanceType<typeof CanvasEditor> | null>(null)
 const showCompare = ref(false)
 const historyMode = ref(false)
+const diseaseMode = ref(false)
 const currentTool = ref<string>('select')
 const currentColor = ref('#3b82f6')
 const brushWidth = ref(10)
@@ -138,6 +170,37 @@ function handleImportLineArt() {
 
 function handleObjectsUpdated() {
   // 对象更新时的回调
+}
+
+function toggleDiseaseMode() {
+  diseaseMode.value = !diseaseMode.value
+  if (diseaseMode.value) {
+    historyMode.value = false
+    diseaseStore.setDiseaseVisible(true)
+  } else {
+    diseaseStore.cancelDrawing()
+    diseaseStore.selectDisease(null)
+  }
+}
+
+function handleStartDiseaseDrawing(_shapeType: 'rect' | 'polygon' | 'freehand') {
+  // 绘制由 DiseasePanel 和 disease store 控制
+}
+
+function handleCancelDiseaseDrawing() {
+  // 取消绘制由 disease store 控制
+}
+
+function handleSelectDisease(_diseaseId: string | null) {
+  // 选中病害
+}
+
+function handleDiseaseCreated(_diseaseId: string) {
+  // 病害创建完成
+}
+
+function handleDiseaseSelected(_diseaseId: string | null) {
+  // 画布上选中病害
 }
 
 onMounted(() => {
@@ -253,5 +316,16 @@ body {
   height: 300px;
   flex-shrink: 0;
   border-top: 1px solid #e0e0e0;
+}
+
+.sidebar.disease-mode {
+  width: 320px;
+}
+
+.disease-stats-wrapper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>

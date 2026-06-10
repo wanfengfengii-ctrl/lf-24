@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Solution, Layer, LayerType, ColorAreaStat, HistoricalPeriod, LayerHistoricalInfo, LayerVersion, PeriodColorStat, RestorationReport, FabricObjectData } from '../types'
+import type { Solution, Layer, LayerType, ColorAreaStat, HistoricalPeriod, LayerHistoricalInfo, LayerVersion, PeriodColorStat, RestorationReport, FabricObjectData, DiseaseAnnotation } from '../types'
 import { LAYER_TYPE_LABELS, DEFAULT_HISTORICAL_PERIODS } from '../types'
 
 function generateId(): string {
@@ -50,7 +50,8 @@ export const useSolutionStore = defineStore('solution', () => {
       canvasWidth: 800,
       canvasHeight: 600,
       historicalPeriods,
-      selectedPeriodIds: historicalPeriods.map(p => p.id)
+      selectedPeriodIds: historicalPeriods.map(p => p.id),
+      diseases: []
     }
     solutions.value.push(solution)
     currentSolutionId.value = solution.id
@@ -169,7 +170,8 @@ export const useSolutionStore = defineStore('solution', () => {
       canvasWidth: source.canvasWidth,
       canvasHeight: source.canvasHeight,
       historicalPeriods: newPeriods,
-      selectedPeriodIds: source.selectedPeriodIds.map(id => periodIdMap.get(id) || id).filter(id => newPeriods.some(p => p.id === id))
+      selectedPeriodIds: source.selectedPeriodIds.map(id => periodIdMap.get(id) || id).filter(id => newPeriods.some(p => p.id === id)),
+      diseases: JSON.parse(JSON.stringify(source.diseases || []))
     }
     solutions.value.push(newSolution)
     return newSolution
@@ -430,6 +432,24 @@ export const useSolutionStore = defineStore('solution', () => {
         selectedPeriodIds = historicalPeriods.map(p => p.id)
       }
 
+      let diseases: DiseaseAnnotation[] = []
+      if (data.diseases && Array.isArray(data.diseases)) {
+        diseases = data.diseases.map((d: any) => ({
+          id: generateId(),
+          name: d.name || '未命名病害',
+          type: d.type || 'other',
+          severity: d.severity || 'mild',
+          description: d.description || '',
+          discoveredAt: d.discoveredAt || Date.now(),
+          treatmentSuggestion: d.treatmentSuggestion || '',
+          shapeType: d.shapeType || 'rect',
+          points: d.points || [],
+          boundingBox: d.boundingBox || { left: 0, top: 0, width: 0, height: 0 },
+          area: d.area || 0,
+          color: d.color || '#888888'
+        }))
+      }
+
       const solution: Solution = {
         id: generateId(),
         name: `${data.name} (导入)`,
@@ -440,7 +460,8 @@ export const useSolutionStore = defineStore('solution', () => {
         canvasWidth: data.canvasWidth || 800,
         canvasHeight: data.canvasHeight || 600,
         historicalPeriods,
-        selectedPeriodIds
+        selectedPeriodIds,
+        diseases
       }
       solutions.value.push(solution)
       return solution
