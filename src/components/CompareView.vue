@@ -42,6 +42,7 @@ import * as fabric from 'fabric'
 import { useSolutionStore } from '../stores/solution'
 import { storeToRefs } from 'pinia'
 import type { Solution } from '../types'
+import { CanvasRenderer } from '../utils/canvasRenderer'
 
 const props = defineProps<{
   show: boolean
@@ -54,7 +55,7 @@ const emit = defineEmits<{
 const solutionStore = useSolutionStore()
 const { solutions, compareSolutionIds } = storeToRefs(solutionStore)
 
-const fabricCanvases = ref<Map<string, any>>(new Map())
+const renderers = ref<Map<string, CanvasRenderer>>(new Map())
 
 const compareSolutions = computed(() => {
   return compareSolutionIds.value
@@ -66,7 +67,7 @@ function initCompareCanvases() {
   nextTick(() => {
     compareSolutions.value.forEach(solution => {
       const canvasId = `compare-canvas-${solution.id}`
-      const existing = fabricCanvases.value.get(solution.id)
+      const existing = renderers.value.get(solution.id)
       if (existing) {
         existing.dispose()
       }
@@ -78,87 +79,22 @@ function initCompareCanvases() {
         selection: false
       })
 
-      fabricCanvases.value.set(solution.id, canvas)
-      renderSolution(canvas, solution)
+      const renderer = new CanvasRenderer(canvas)
+      renderers.value.set(solution.id, renderer)
+
+      const renderAll = () => {
+        renderer.renderLayers(solution.layers, { readOnly: true })
+      }
+
+      if (solution.lineArt) {
+        renderer.setLineArt(solution.lineArt, solution.canvasWidth, solution.canvasHeight).then(() => {
+          renderAll()
+        })
+      } else {
+        renderAll()
+      }
     })
   })
-}
-
-function renderSolution(canvas: any, solution: Solution) {
-  if (solution.lineArt) {
-    fabric.FabricImage.fromURL(solution.lineArt).then((img: any) => {
-      const canvasWidth = solution.canvasWidth
-      const canvasHeight = solution.canvasHeight
-      const imgWidth = img.width || canvasWidth
-      const imgHeight = img.height || canvasHeight
-
-      const scale = Math.min(canvasWidth / imgWidth, canvasHeight / imgHeight) * 0.9
-      const scaledWidth = imgWidth * scale
-      const scaledHeight = imgHeight * scale
-
-      img.set({
-        left: (canvasWidth - scaledWidth) / 2,
-        top: (canvasHeight - scaledHeight) / 2,
-        scaleX: scale,
-        scaleY: scale,
-        selectable: false,
-        evented: false
-      })
-
-      canvas.add(img)
-      canvas.sendObjectToBack(img)
-      renderLayers(canvas, solution)
-    })
-  } else {
-    renderLayers(canvas, solution)
-  }
-}
-
-function renderLayers(canvas: any, solution: Solution) {
-  const sortedLayers = [...solution.layers].sort((a, b) => a.zIndex - b.zIndex)
-
-  for (const layer of sortedLayers) {
-    if (!layer.visible) continue
-
-    for (const objData of layer.objects) {
-      try {
-        let fabricObj: any = null
-
-        switch (objData.type) {
-          case 'rect':
-            fabricObj = new fabric.Rect(objData)
-            break
-          case 'circle':
-            fabricObj = new fabric.Circle(objData)
-            break
-          case 'ellipse':
-            fabricObj = new fabric.Ellipse(objData)
-            break
-          case 'polygon':
-            fabricObj = new fabric.Polygon(objData.points || [], objData as any)
-            break
-          case 'path':
-            fabricObj = new fabric.Path(objData.path || '', objData)
-            break
-          default:
-            continue
-        }
-
-        if (fabricObj) {
-          fabricObj.set({
-            opacity: (layer.opacity / 100) * (objData.opacity || 1),
-            selectable: false,
-            evented: false
-          })
-          canvas.add(fabricObj)
-        }
-      } catch (e) {
-        console.error('Failed to render object:', e)
-      }
-    }
-  }
-
-  canvas.renderAll()
 }
 
 function handleUpdateShow(value: boolean) {
@@ -168,10 +104,10 @@ function handleUpdateShow(value: boolean) {
 }
 
 function handleClose() {
-  fabricCanvases.value.forEach(canvas => {
-    canvas.dispose()
+  renderers.value.forEach(renderer => {
+    renderer.dispose()
   })
-  fabricCanvases.value.clear()
+  renderers.value.clear()
   emit('update:show', false)
 }
 

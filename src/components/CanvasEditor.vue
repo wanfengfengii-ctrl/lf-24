@@ -24,6 +24,8 @@ import { useDialog, useMessage, NEmpty, NButton } from 'naive-ui'
 import * as fabric from 'fabric'
 import { useSolutionStore } from '../stores/solution'
 import { useDiseaseStore } from '../stores/disease'
+import { useWorkspaceStore, type DrawingTool } from '../stores/workspace'
+import { createFabricObjectFromData } from '../utils/canvasRenderer'
 import { storeToRefs } from 'pinia'
 import type { DiseasePoint, DiseaseType, DiseaseSeverity } from '../types'
 import { DISEASE_TYPE_COLORS } from '../types'
@@ -54,6 +56,7 @@ const {
   filterType,
   filterSeverity
 } = storeToRefs(diseaseStore)
+const workspaceStore = useWorkspaceStore()
 const dialog = useDialog()
 const message = useMessage()
 
@@ -65,11 +68,6 @@ const isUpdating = ref(false)
 
 const hasLineArt = computed(() => currentSolution.value?.lineArt != null)
 
-type ToolType = 'select' | 'brush' | 'rect' | 'circle' | 'polygon' | 'eraser'
-
-const currentTool = ref<ToolType>('select')
-const currentColor = ref('#3b82f6')
-const brushWidth = ref(10)
 const isDrawing = ref(false)
 const drawingPath = ref<any[]>([])
 const drawingStartPoint = ref<{ x: number; y: number } | null>(null)
@@ -77,8 +75,6 @@ const drawingPreview = ref<any>(null)
 
 const diseaseDrawingStartPoint = ref<{ x: number; y: number } | null>(null)
 const diseaseDrawingPreview = ref<any>(null)
-const currentDiseaseType = ref<DiseaseType>('fading')
-const currentDiseaseSeverity = ref<DiseaseSeverity>(3)
 const diseaseObjects = ref<any[]>([])
 
 function initCanvas() {
@@ -286,32 +282,6 @@ function renderDiseases() {
   }
 }
 
-function createFabricObjectFromData(data: any): any {
-  switch (data.type) {
-    case 'rect':
-      return new fabric.Rect(data)
-    case 'circle':
-      return new fabric.Circle(data)
-    case 'ellipse':
-      return new fabric.Ellipse(data)
-    case 'polygon':
-      return new fabric.Polygon(data.points || [], data)
-    case 'polyline':
-      return new fabric.Polyline(data.points || [], data)
-    case 'path':
-      return new fabric.Path(data.path || '', data)
-    case 'triangle':
-      return new fabric.Triangle(data)
-    case 'line':
-      return new fabric.Line([data.x1 || 0, data.y1 || 0, data.x2 || 0, data.y2 || 0], data)
-    case 'i-text':
-    case 'text':
-      return new fabric.IText(data.text || '', data)
-    default:
-      return null
-  }
-}
-
 function handleObjectModified() {
   if (!activeLayer.value || props.readOnly) return
   saveActiveLayerObjects()
@@ -334,21 +304,21 @@ function handleMouseDown(options: any) {
   }
 
   if (!activeLayer.value) return
-  if (currentTool.value === 'select') return
+  if (workspaceStore.currentTool === 'select') return
 
   isDrawing.value = true
   drawingStartPoint.value = { x: pointer.x, y: pointer.y }
 
-  if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
+  if (workspaceStore.currentTool === 'brush' || workspaceStore.currentTool === 'eraser' || workspaceStore.currentTool === 'polygon') {
     drawingPath.value = [new fabric.Point(pointer.x, pointer.y)]
-  } else if (currentTool.value === 'rect') {
+  } else if (workspaceStore.currentTool === 'rect') {
     drawingPreview.value = new fabric.Rect({
       left: pointer.x,
       top: pointer.y,
       width: 0,
       height: 0,
-      fill: currentColor.value,
-      stroke: currentColor.value,
+      fill: workspaceStore.currentColor,
+      stroke: workspaceStore.currentColor,
       strokeWidth: 1,
       selectable: false,
       evented: false,
@@ -356,13 +326,13 @@ function handleMouseDown(options: any) {
       data: { layerId: activeLayer.value.id }
     })
     fabricCanvas.value.add(drawingPreview.value)
-  } else if (currentTool.value === 'circle') {
+  } else if (workspaceStore.currentTool === 'circle') {
     drawingPreview.value = new fabric.Circle({
       left: pointer.x,
       top: pointer.y,
       radius: 0,
-      fill: currentColor.value,
-      stroke: currentColor.value,
+      fill: workspaceStore.currentColor,
+      stroke: workspaceStore.currentColor,
       strokeWidth: 1,
       selectable: false,
       evented: false,
@@ -391,7 +361,7 @@ function handleDiseaseMouseDown(pointer: { x: number; y: number }) {
   diseaseDrawingStartPoint.value = { x: pointer.x, y: pointer.y }
   diseaseStore.addDrawingPoint({ x: pointer.x, y: pointer.y })
 
-  const color = DISEASE_TYPE_COLORS[currentDiseaseType.value]
+  const color = DISEASE_TYPE_COLORS[workspaceStore.diseaseDrawingType]
 
   if (drawingShapeType.value === 'rect') {
     diseaseDrawingPreview.value = new fabric.Rect({
@@ -463,11 +433,11 @@ function handleMouseMove(options: any) {
   }
 
   if (!isDrawing.value || !activeLayer.value) return
-  if (currentTool.value === 'select') return
+  if (workspaceStore.currentTool === 'select') return
 
-  if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
+  if (workspaceStore.currentTool === 'brush' || workspaceStore.currentTool === 'eraser' || workspaceStore.currentTool === 'polygon') {
     drawingPath.value.push(new fabric.Point(pointer.x, pointer.y))
-  } else if (currentTool.value === 'rect' && drawingPreview.value && drawingStartPoint.value) {
+  } else if (workspaceStore.currentTool === 'rect' && drawingPreview.value && drawingStartPoint.value) {
     const startX = drawingStartPoint.value.x
     const startY = drawingStartPoint.value.y
     const width = pointer.x - startX
@@ -480,7 +450,7 @@ function handleMouseMove(options: any) {
       height: Math.abs(height)
     })
     fabricCanvas.value.renderAll()
-  } else if (currentTool.value === 'circle' && drawingPreview.value && drawingStartPoint.value) {
+  } else if (workspaceStore.currentTool === 'circle' && drawingPreview.value && drawingStartPoint.value) {
     const startX = drawingStartPoint.value.x
     const startY = drawingStartPoint.value.y
     const dx = pointer.x - startX
@@ -529,7 +499,7 @@ function handleMouseUp() {
   }
 
   if (!isDrawing.value || !activeLayer.value) return
-  if (currentTool.value === 'select') return
+  if (workspaceStore.currentTool === 'select') return
 
   isDrawing.value = false
 
@@ -539,7 +509,7 @@ function handleMouseUp() {
 
   let newShape: any = null
 
-  if (currentTool.value === 'brush' || currentTool.value === 'eraser' || currentTool.value === 'polygon') {
+  if (workspaceStore.currentTool === 'brush' || workspaceStore.currentTool === 'eraser' || workspaceStore.currentTool === 'polygon') {
     if (drawingPath.value.length < 2) {
       drawingPath.value = []
       drawingPreview.value = null
@@ -549,21 +519,21 @@ function handleMouseUp() {
 
     const pathData = pointsToPath(drawingPath.value)
     newShape = new fabric.Path(pathData, {
-      stroke: currentColor.value,
-      strokeWidth: brushWidth.value,
-      fill: currentTool.value === 'brush' ? 'none' : currentColor.value,
+      stroke: workspaceStore.currentColor,
+      strokeWidth: workspaceStore.brushWidth,
+      fill: workspaceStore.currentTool === 'brush' ? 'none' : workspaceStore.currentColor,
       selectable: true,
       data: { layerId: activeLayer.value.id }
     })
 
-    if (currentTool.value === 'eraser') {
+    if (workspaceStore.currentTool === 'eraser') {
       newShape.set({
         stroke: '#ffffff',
-        strokeWidth: brushWidth.value * 2,
+        strokeWidth: workspaceStore.brushWidth * 2,
         globalCompositeOperation: 'destination-out'
       })
     }
-  } else if (currentTool.value === 'rect' && drawingPreview.value && drawingStartPoint.value) {
+  } else if (workspaceStore.currentTool === 'rect' && drawingPreview.value && drawingStartPoint.value) {
     const width = drawingPreview.value.width || 0
     const height = drawingPreview.value.height || 0
     const left = drawingPreview.value.left || 0
@@ -575,12 +545,12 @@ function handleMouseUp() {
         top,
         width,
         height,
-        fill: currentColor.value,
+        fill: workspaceStore.currentColor,
         selectable: true,
         data: { layerId: activeLayer.value.id }
       })
     }
-  } else if (currentTool.value === 'circle' && drawingPreview.value && drawingStartPoint.value) {
+  } else if (workspaceStore.currentTool === 'circle' && drawingPreview.value && drawingStartPoint.value) {
     const radius = drawingPreview.value.radius || 0
     const left = drawingPreview.value.left || 0
     const top = drawingPreview.value.top || 0
@@ -590,7 +560,7 @@ function handleMouseUp() {
         left,
         top,
         radius,
-        fill: currentColor.value,
+        fill: workspaceStore.currentColor,
         selectable: true,
         data: { layerId: activeLayer.value.id }
       })
@@ -643,8 +613,8 @@ function handleDiseaseMouseUp() {
 
 function finishDiseaseDrawing(points: DiseasePoint[]) {
   const disease = diseaseStore.finishDrawing(
-    currentDiseaseType.value,
-    currentDiseaseSeverity.value,
+    workspaceStore.diseaseDrawingType,
+    workspaceStore.diseaseDrawingSeverity,
     points
   )
   if (disease) {
@@ -654,11 +624,11 @@ function finishDiseaseDrawing(points: DiseasePoint[]) {
 }
 
 function setDiseaseType(type: DiseaseType) {
-  currentDiseaseType.value = type
+  workspaceStore.setDiseaseDrawingType(type)
 }
 
 function setDiseaseSeverity(severity: DiseaseSeverity) {
-  currentDiseaseSeverity.value = severity
+  workspaceStore.setDiseaseDrawingSeverity(severity)
 }
 
 function pointsToPath(points: any[]): string {
@@ -710,8 +680,8 @@ function handleFileImport(e: Event) {
   target.value = ''
 }
 
-function setTool(tool: ToolType) {
-  currentTool.value = tool
+function setTool(tool: DrawingTool) {
+  workspaceStore.setTool(tool)
   if (fabricCanvas.value) {
     fabricCanvas.value.selection = tool === 'select'
     fabricCanvas.value.forEachObject((obj: any) => {
@@ -725,11 +695,11 @@ function setTool(tool: ToolType) {
 }
 
 function setColor(color: string) {
-  currentColor.value = color
+  workspaceStore.setColor(color)
 }
 
 function setBrushWidth(width: number) {
-  brushWidth.value = width
+  workspaceStore.setBrushWidth(width)
 }
 
 function clearActiveLayer() {
@@ -774,64 +744,9 @@ watch(() => currentSolution.value?.layers, () => {
   renderAllLayers()
 }, { deep: true })
 
-watch(activeLayer, () => {
-  if (fabricCanvas.value && !props.readOnly) {
-    fabricCanvas.value.forEachObject((obj: any) => {
-      const layerId = obj.data?.layerId
-      obj.selectable = layerId === activeLayer.value?.id
-      obj.evented = layerId === activeLayer.value?.id
-    })
-    fabricCanvas.value.renderAll()
-  }
-})
-
-watch(selectedPeriodIds, () => {
-  if (props.enablePeriodFilter) {
-    renderAllLayers()
-  }
+watch(() => workspaceStore.canvasRenderKey, () => {
+  renderAllLayers()
 }, { deep: true })
-
-watch(activePeriodId, () => {
-  if (props.enablePeriodFilter) {
-    renderAllLayers()
-  }
-})
-
-watch(() => props.enableDiseaseMode, () => {
-  if (fabricCanvas.value) {
-    renderAllLayers()
-  }
-})
-
-watch(diseaseVisible, () => {
-  if (props.enableDiseaseMode && fabricCanvas.value) {
-    renderAllLayers()
-  }
-})
-
-watch(diseases, () => {
-  if (props.enableDiseaseMode && fabricCanvas.value) {
-    renderAllLayers()
-  }
-}, { deep: true })
-
-watch(selectedDiseaseId, () => {
-  if (props.enableDiseaseMode && fabricCanvas.value) {
-    renderAllLayers()
-  }
-})
-
-watch(filterType, () => {
-  if (props.enableDiseaseMode && fabricCanvas.value) {
-    renderAllLayers()
-  }
-})
-
-watch(filterSeverity, () => {
-  if (props.enableDiseaseMode && fabricCanvas.value) {
-    renderAllLayers()
-  }
-})
 
 onMounted(() => {
   nextTick(() => {

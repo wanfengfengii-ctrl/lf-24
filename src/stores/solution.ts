@@ -1,18 +1,20 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Solution, Layer, LayerType, ColorAreaStat, HistoricalPeriod, LayerHistoricalInfo, LayerVersion, PeriodColorStat, RestorationReport, FabricObjectData, DiseaseAnnotation } from '../types'
-import { LAYER_TYPE_LABELS, DEFAULT_HISTORICAL_PERIODS } from '../types'
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9)
-}
+import type { Solution, Layer, LayerType, ColorAreaStat, HistoricalPeriod, LayerHistoricalInfo, LayerVersion, PeriodColorStat, RestorationReport, FabricObjectData, DiseaseAnnotation, DiseasePoint, DiseaseType, DiseaseSeverity, DiseaseStage, DiseaseStageRecord, TreatmentStatus } from '../types'
+import { LAYER_TYPE_LABELS, DEFAULT_HISTORICAL_PERIODS, DISEASE_TYPE_LABELS, DISEASE_TYPE_COLORS } from '../types'
+import { generateId } from '../utils/id'
+import { calculateShapeArea, calculateBoundingBox } from '../utils/geometry'
+import { calculateColorStatsForLayers } from '../utils/colorStats'
+import { useWorkspaceStore } from './workspace'
 
 export const useSolutionStore = defineStore('solution', () => {
+  const workspaceStore = useWorkspaceStore()
   const solutions = ref<Solution[]>([])
-  const currentSolutionId = ref<string | null>(null)
-  const activeLayerId = ref<string | null>(null)
-  const activePeriodId = ref<string | null>(null)
-  const compareSolutionIds = ref<string[]>([])
+
+  const currentSolutionId = computed(() => workspaceStore.currentSolutionId)
+  const activeLayerId = computed(() => workspaceStore.activeLayerId)
+  const activePeriodId = computed(() => workspaceStore.activePeriodId)
+  const compareSolutionIds = computed(() => workspaceStore.compareSolutionIds)
 
   const currentSolution = computed(() => {
     return solutions.value.find(s => s.id === currentSolutionId.value) || null
@@ -34,6 +36,38 @@ export const useSolutionStore = defineStore('solution', () => {
     return sortedLayers.value.filter(l => l.visible)
   })
 
+  const diseases = computed(() => {
+    return currentSolution.value?.diseases || []
+  })
+
+  const visibleDiseases = computed(() => {
+    return diseases.value.filter(d => d.visible)
+  })
+
+  const filteredDiseases = computed(() => {
+    const filterType = workspaceStore.filterType
+    const filterSeverity = workspaceStore.filterSeverity
+    const filterStage = workspaceStore.filterStage
+    const filterTreatmentStatus = workspaceStore.filterTreatmentStatus
+    return visibleDiseases.value.filter(d => {
+      if (filterType !== 'all' && !d.types.includes(filterType)) return false
+      if (filterSeverity !== 'all' && d.severity !== filterSeverity) return false
+      if (filterStage !== 'all' && d.currentStage !== filterStage) return false
+      if (filterTreatmentStatus !== 'all' && d.treatmentStatus !== filterTreatmentStatus) return false
+      return true
+    })
+  })
+
+  const selectedDisease = computed(() => {
+    return diseases.value.find(d => d.id === workspaceStore.selectedDiseaseId) || null
+  })
+
+  function touchSolution() {
+    if (currentSolution.value) {
+      currentSolution.value.updatedAt = Date.now()
+    }
+  }
+
   function createNewSolution(name: string = '未命名方案'): Solution {
     const historicalPeriods: HistoricalPeriod[] = DEFAULT_HISTORICAL_PERIODS.map(p => ({
       ...p,
@@ -54,7 +88,7 @@ export const useSolutionStore = defineStore('solution', () => {
       diseases: []
     }
     solutions.value.push(solution)
-    currentSolutionId.value = solution.id
+    workspaceStore.setCurrentSolutionId(solution.id)
 
     const defaultLayers: Array<{ type: LayerType; name: string }> = [
       { type: 'background', name: '底色层 1' },
@@ -93,9 +127,9 @@ export const useSolutionStore = defineStore('solution', () => {
 
     if (solution.layers.length > 0) {
       const sorted = [...solution.layers].sort((a, b) => a.zIndex - b.zIndex)
-      activeLayerId.value = sorted[sorted.length - 1].id
+      workspaceStore.setActiveLayer(sorted[sorted.length - 1].id)
     }
-    activePeriodId.value = firstPeriodId
+    workspaceStore.setActivePeriod(firstPeriodId)
 
     return solution
   }
@@ -103,14 +137,14 @@ export const useSolutionStore = defineStore('solution', () => {
   function switchSolution(solutionId: string) {
     const solution = solutions.value.find(s => s.id === solutionId)
     if (solution) {
-      currentSolutionId.value = solutionId
+      workspaceStore.setCurrentSolutionId(solutionId)
       if (solution.layers.length > 0) {
         const sorted = [...solution.layers].sort((a, b) => a.zIndex - b.zIndex)
-        activeLayerId.value = sorted[sorted.length - 1].id
+        workspaceStore.setActiveLayer(sorted[sorted.length - 1].id)
       } else {
-        activeLayerId.value = null
+        workspaceStore.setActiveLayer(null)
       }
-      activePeriodId.value = solution.historicalPeriods[0]?.id || null
+      workspaceStore.setActivePeriod(solution.historicalPeriods[0]?.id || null)
     }
   }
 
@@ -119,9 +153,12 @@ export const useSolutionStore = defineStore('solution', () => {
     if (index !== -1) {
       solutions.value.splice(index, 1)
       if (currentSolutionId.value === solutionId) {
-        currentSolutionId.value = solutions.value.length > 0 ? solutions.value[0].id : null
+        workspaceStore.setCurrentSolutionId(solutions.value.length > 0 ? solutions.value[0].id : null)
       }
-      compareSolutionIds.value = compareSolutionIds.value.filter(id => id !== solutionId)
+      workspaceStore.compareSolutionIds.splice(
+        workspaceStore.compareSolutionIds.indexOf(solutionId),
+        1
+      )
     }
   }
 
@@ -217,8 +254,8 @@ export const useSolutionStore = defineStore('solution', () => {
     }
 
     currentSolution.value.layers.push(layer)
-    activeLayerId.value = layer.id
-    currentSolution.value.updatedAt = Date.now()
+    workspaceStore.setActiveLayer(layer.id)
+    touchSolution()
     return layer
   }
 
@@ -247,9 +284,9 @@ export const useSolutionStore = defineStore('solution', () => {
       currentSolution.value.layers.splice(index, 1)
       if (activeLayerId.value === layerId) {
         const remaining = currentSolution.value.layers
-        activeLayerId.value = remaining.length > 0 ? remaining[remaining.length - 1].id : null
+        workspaceStore.setActiveLayer(remaining.length > 0 ? remaining[remaining.length - 1].id : null)
       }
-      currentSolution.value.updatedAt = Date.now()
+      touchSolution()
     }
   }
 
@@ -260,7 +297,7 @@ export const useSolutionStore = defineStore('solution', () => {
     const layer = currentSolution.value.layers.find(l => l.id === layerId)
     if (layer) {
       layer.name = name
-      currentSolution.value.updatedAt = Date.now()
+      touchSolution()
       return true
     }
     return false
@@ -271,7 +308,7 @@ export const useSolutionStore = defineStore('solution', () => {
     const layer = currentSolution.value.layers.find(l => l.id === layerId)
     if (layer) {
       layer.visible = visible
-      currentSolution.value.updatedAt = Date.now()
+      touchSolution()
     }
   }
 
@@ -281,44 +318,44 @@ export const useSolutionStore = defineStore('solution', () => {
     const layer = currentSolution.value.layers.find(l => l.id === layerId)
     if (layer) {
       layer.opacity = clampedOpacity
-      currentSolution.value.updatedAt = Date.now()
+      touchSolution()
     }
   }
 
   function moveLayerUp(layerId: string) {
     if (!currentSolution.value) return
-    const layers = currentSolution.value.layers
-    const layer = layers.find(l => l.id === layerId)
+    const ls = currentSolution.value.layers
+    const layer = ls.find(l => l.id === layerId)
     if (!layer) return
 
-    const higherLayers = layers.filter(l => l.zIndex > layer.zIndex)
+    const higherLayers = ls.filter(l => l.zIndex > layer.zIndex)
     if (higherLayers.length === 0) return
 
     const nextLayer = higherLayers.sort((a, b) => a.zIndex - b.zIndex)[0]
     const tempZ = layer.zIndex
     layer.zIndex = nextLayer.zIndex
     nextLayer.zIndex = tempZ
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
   }
 
   function moveLayerDown(layerId: string) {
     if (!currentSolution.value) return
-    const layers = currentSolution.value.layers
-    const layer = layers.find(l => l.id === layerId)
+    const ls = currentSolution.value.layers
+    const layer = ls.find(l => l.id === layerId)
     if (!layer) return
 
-    const lowerLayers = layers.filter(l => l.zIndex < layer.zIndex)
+    const lowerLayers = ls.filter(l => l.zIndex < layer.zIndex)
     if (lowerLayers.length === 0) return
 
     const prevLayer = lowerLayers.sort((a, b) => b.zIndex - a.zIndex)[0]
     const tempZ = layer.zIndex
     layer.zIndex = prevLayer.zIndex
     prevLayer.zIndex = tempZ
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
   }
 
   function setActiveLayer(layerId: string) {
-    activeLayerId.value = layerId
+    workspaceStore.setActiveLayer(layerId)
   }
 
   function setLayerObjects(layerId: string, objects: any[]) {
@@ -326,21 +363,21 @@ export const useSolutionStore = defineStore('solution', () => {
     const layer = currentSolution.value.layers.find(l => l.id === layerId)
     if (layer) {
       layer.objects = objects
-      currentSolution.value.updatedAt = Date.now()
+      touchSolution()
     }
   }
 
   function setLineArt(dataUrl: string) {
     if (!currentSolution.value) return
     currentSolution.value.lineArt = dataUrl
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
   }
 
   function setCanvasSize(width: number, height: number) {
     if (!currentSolution.value) return
     currentSolution.value.canvasWidth = width
     currentSolution.value.canvasHeight = height
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
   }
 
   function exportSolution(solutionId: string): string | null {
@@ -382,7 +419,7 @@ export const useSolutionStore = defineStore('solution', () => {
         })
       }
 
-      const layers = data.layers.map((l: any) => {
+      const layerList = data.layers.map((l: any) => {
         let historicalInfo = l.historicalInfo
         if (!historicalInfo) {
           historicalInfo = {
@@ -432,9 +469,9 @@ export const useSolutionStore = defineStore('solution', () => {
         selectedPeriodIds = historicalPeriods.map(p => p.id)
       }
 
-      let diseases: DiseaseAnnotation[] = []
+      let importedDiseases: DiseaseAnnotation[] = []
       if (data.diseases && Array.isArray(data.diseases)) {
-        diseases = data.diseases.map((d: any) => {
+        importedDiseases = data.diseases.map((d: any) => {
           const primaryType = d.primaryType || d.type || 'other'
           const types = d.types && Array.isArray(d.types) && d.types.length > 0
             ? d.types
@@ -496,12 +533,12 @@ export const useSolutionStore = defineStore('solution', () => {
         createdAt: data.createdAt || Date.now(),
         updatedAt: Date.now(),
         lineArt: data.lineArt || null,
-        layers,
+        layers: layerList,
         canvasWidth: data.canvasWidth || 800,
         canvasHeight: data.canvasHeight || 600,
         historicalPeriods,
         selectedPeriodIds,
-        diseases
+        diseases: importedDiseases
       }
       solutions.value.push(solution)
       return solution
@@ -527,29 +564,11 @@ export const useSolutionStore = defineStore('solution', () => {
   }
 
   function toggleCompare(solutionId: string) {
-    const index = compareSolutionIds.value.indexOf(solutionId)
-    if (index === -1) {
-      if (compareSolutionIds.value.length < 4) {
-        compareSolutionIds.value.push(solutionId)
-      }
-    } else {
-      compareSolutionIds.value.splice(index, 1)
-    }
+    workspaceStore.toggleCompare(solutionId)
   }
 
   function clearCompare() {
-    compareSolutionIds.value = []
-  }
-
-  function calculatePolygonArea(points: { x: number; y: number }[]): number {
-    if (points.length < 3) return 0
-    let area = 0
-    for (let i = 0; i < points.length; i++) {
-      const j = (i + 1) % points.length
-      area += points[i].x * points[j].y
-      area -= points[j].x * points[i].y
-    }
-    return Math.abs(area / 2)
+    workspaceStore.clearCompare()
   }
 
   function hasLayerContent(layerId: string): boolean {
@@ -603,7 +622,7 @@ export const useSolutionStore = defineStore('solution', () => {
       }
     }
 
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
     return newPeriod
   }
 
@@ -612,7 +631,7 @@ export const useSolutionStore = defineStore('solution', () => {
     const period = currentSolution.value.historicalPeriods.find(p => p.id === periodId)
     if (!period) return false
     Object.assign(period, updates)
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
     return true
   }
 
@@ -634,10 +653,10 @@ export const useSolutionStore = defineStore('solution', () => {
     }
 
     if (activePeriodId.value === periodId) {
-      activePeriodId.value = currentSolution.value.historicalPeriods[0]?.id || null
+      workspaceStore.setActivePeriod(currentSolution.value.historicalPeriods[0]?.id || null)
     }
 
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
     return true
   }
 
@@ -649,13 +668,13 @@ export const useSolutionStore = defineStore('solution', () => {
     } else {
       currentSolution.value.selectedPeriodIds.splice(index, 1)
     }
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
   }
 
   function setSelectedPeriods(periodIds: string[]) {
     if (!currentSolution.value) return
     currentSolution.value.selectedPeriodIds = periodIds
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
   }
 
   function setLayerHistoricalInfo(layerId: string, info: Partial<LayerHistoricalInfo>): boolean {
@@ -667,7 +686,7 @@ export const useSolutionStore = defineStore('solution', () => {
       newInfo.confidence = Math.max(0, Math.min(100, info.confidence))
     }
     layer.historicalInfo = newInfo
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
     return true
   }
 
@@ -680,7 +699,7 @@ export const useSolutionStore = defineStore('solution', () => {
   }
 
   function setActivePeriod(periodId: string | null) {
-    activePeriodId.value = periodId
+    workspaceStore.setActivePeriod(periodId)
   }
 
   function getActiveLayerVersionObjects(): FabricObjectData[] {
@@ -706,7 +725,7 @@ export const useSolutionStore = defineStore('solution', () => {
       layer.versions.push(version)
     }
     version.objects = objects
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
     return true
   }
 
@@ -737,64 +756,8 @@ export const useSolutionStore = defineStore('solution', () => {
       version.deductionBasis = info.deductionBasis
     }
 
-    currentSolution.value.updatedAt = Date.now()
+    touchSolution()
     return true
-  }
-
-  function calculateColorStatsForLayers(targetLayers: Layer[], periodId?: string | null): ColorAreaStat[] {
-    const stats: Map<string, number> = new Map()
-    let totalArea = 0
-
-    for (const layer of targetLayers) {
-      let objects = layer.objects
-      if (periodId) {
-        const version = layer.versions.find(v => v.periodId === periodId)
-        if (version) {
-          objects = version.objects
-        }
-      }
-
-      for (const obj of objects) {
-        const color = obj.fill || obj.stroke
-        if (!color || typeof color !== 'string') continue
-        if (color === 'transparent' || color === 'none') continue
-
-        let area = 0
-        if (obj.type === 'rect') {
-          area = (obj.width || 0) * (obj.height || 0)
-        } else if (obj.type === 'circle') {
-          area = Math.PI * Math.pow(obj.radius || 0, 2)
-        } else if (obj.type === 'ellipse') {
-          area = Math.PI * (obj.rx || 0) * (obj.ry || 0)
-        } else if (obj.type === 'polygon' || obj.type === 'polyline') {
-          area = calculatePolygonArea(obj.points || [])
-        } else if (obj.type === 'path') {
-          area = (obj.width || 0) * (obj.height || 0) * 0.5
-        } else {
-          area = (obj.width || 0) * (obj.height || 0)
-        }
-
-        const opacityFactor = (layer.opacity / 100) * (obj.opacity || 1)
-        area = area * opacityFactor
-
-        if (area > 0) {
-          const normalizedColor = color.toLowerCase()
-          stats.set(normalizedColor, (stats.get(normalizedColor) || 0) + area)
-          totalArea += area
-        }
-      }
-    }
-
-    const result: ColorAreaStat[] = []
-    for (const [color, area] of stats) {
-      result.push({
-        color,
-        area: Math.round(area),
-        percentage: totalArea > 0 ? Math.round((area / totalArea) * 10000) / 100 : 0
-      })
-    }
-
-    return result.sort((a, b) => b.area - a.area)
   }
 
   function calculateColorAreaStats(): ColorAreaStat[] {
@@ -884,6 +847,257 @@ export const useSolutionStore = defineStore('solution', () => {
     return JSON.stringify(report, null, 2)
   }
 
+  function addDisease(data: {
+    name?: string
+    types?: DiseaseType[]
+    primaryType: DiseaseType
+    severity: DiseaseSeverity
+    description?: string
+    treatmentSuggestion?: string
+    shapeType: 'rect' | 'polygon' | 'freehand'
+    points: DiseasePoint[]
+  }): DiseaseAnnotation | null {
+    if (!currentSolution.value) return null
+
+    const area = calculateShapeArea(data.shapeType, data.points)
+    const bbox = calculateBoundingBox(data.points)
+    const types = data.types && data.types.length > 0 ? data.types : [data.primaryType]
+
+    const disease: DiseaseAnnotation = {
+      id: generateId(),
+      name: data.name || `${DISEASE_TYPE_LABELS[data.primaryType]} ${diseases.value.length + 1}`,
+      types,
+      primaryType: data.primaryType,
+      severity: data.severity,
+      description: data.description || '',
+      discoveredAt: Date.now(),
+      treatmentSuggestion: data.treatmentSuggestion || '',
+      shapeType: data.shapeType,
+      points: data.points,
+      boundingBox: bbox,
+      area: Math.round(area),
+      color: DISEASE_TYPE_COLORS[data.primaryType],
+      visible: true,
+      currentStage: 'initial',
+      stageRecords: [],
+      treatmentStatus: 'pending'
+    }
+
+    const initialRecord: DiseaseStageRecord = {
+      id: generateId(),
+      stage: 'initial',
+      inspectorName: '',
+      inspectTime: Date.now(),
+      photos: [],
+      conclusion: data.description || '',
+      treatmentOpinion: data.treatmentSuggestion || '',
+      area: Math.round(area),
+      severity: data.severity
+    }
+
+    disease.stageRecords.push(initialRecord)
+
+    currentSolution.value.diseases.push(disease)
+    workspaceStore.selectDisease(disease.id)
+    touchSolution()
+
+    return disease
+  }
+
+  function updateDisease(diseaseId: string, updates: Partial<Omit<DiseaseAnnotation, 'id' | 'area' | 'boundingBox'>>): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    Object.assign(disease, updates)
+
+    if (updates.points || updates.shapeType) {
+      const shapeType = updates.shapeType || disease.shapeType
+      const points = updates.points || disease.points
+      disease.area = Math.round(calculateShapeArea(shapeType, points))
+      disease.boundingBox = calculateBoundingBox(points)
+    }
+
+    if (updates.primaryType) {
+      disease.color = DISEASE_TYPE_COLORS[updates.primaryType]
+    }
+
+    if (updates.types && updates.types.length > 0 && !updates.primaryType) {
+      if (!updates.types.includes(disease.primaryType)) {
+        disease.primaryType = updates.types[0]
+        disease.color = DISEASE_TYPE_COLORS[updates.types[0]]
+      }
+    }
+
+    touchSolution()
+    return true
+  }
+
+  function deleteDisease(diseaseId: string): boolean {
+    if (!currentSolution.value) return false
+
+    const index = currentSolution.value.diseases.findIndex(d => d.id === diseaseId)
+    if (index === -1) return false
+
+    currentSolution.value.diseases.splice(index, 1)
+
+    if (workspaceStore.selectedDiseaseId === diseaseId) {
+      workspaceStore.selectDisease(null)
+    }
+
+    touchSolution()
+    return true
+  }
+
+  function toggleDiseaseVisible(diseaseId: string): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    disease.visible = !disease.visible
+    touchSolution()
+    return true
+  }
+
+  function setAllDiseasesVisible(visible: boolean): boolean {
+    if (!currentSolution.value) return false
+
+    for (const disease of currentSolution.value.diseases) {
+      disease.visible = visible
+    }
+
+    touchSolution()
+    return true
+  }
+
+  function addStageRecord(diseaseId: string, data: {
+    stage: DiseaseStage
+    inspectorName: string
+    inspectTime?: number
+    photos?: any[]
+    conclusion: string
+    treatmentOpinion: string
+    area?: number
+    severity?: DiseaseSeverity
+    notes?: string
+  }): DiseaseStageRecord | null {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return null
+
+    const record: DiseaseStageRecord = {
+      id: generateId(),
+      stage: data.stage,
+      inspectorName: data.inspectorName,
+      inspectTime: data.inspectTime || Date.now(),
+      photos: data.photos || [],
+      conclusion: data.conclusion,
+      treatmentOpinion: data.treatmentOpinion,
+      area: data.area,
+      severity: data.severity,
+      notes: data.notes
+    }
+
+    disease.stageRecords.push(record)
+    disease.currentStage = data.stage
+
+    if (data.stage === 'treatment') {
+      disease.treatmentStatus = 'processing'
+    } else if (data.stage === 'reinspection') {
+      disease.treatmentStatus = 'completed'
+    }
+
+    touchSolution()
+    return record
+  }
+
+  function updateStageRecord(diseaseId: string, recordId: string, updates: Partial<Omit<DiseaseStageRecord, 'id' | 'stage'>>): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    const record = disease.stageRecords.find(r => r.id === recordId)
+    if (!record) return false
+
+    Object.assign(record, updates)
+    touchSolution()
+    return true
+  }
+
+  function deleteStageRecord(diseaseId: string, recordId: string): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    const index = disease.stageRecords.findIndex(r => r.id === recordId)
+    if (index === -1) return false
+
+    disease.stageRecords.splice(index, 1)
+
+    if (disease.stageRecords.length > 0) {
+      const latestRecord = disease.stageRecords.reduce((latest, r) =>
+        r.inspectTime > latest.inspectTime ? r : latest
+      )
+      disease.currentStage = latestRecord.stage
+    } else {
+      disease.currentStage = 'initial'
+    }
+
+    touchSolution()
+    return true
+  }
+
+  function setDiseaseStage(diseaseId: string, stage: DiseaseStage): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    disease.currentStage = stage
+
+    if (stage === 'initial') {
+      disease.treatmentStatus = 'pending'
+    } else if (stage === 'recheck') {
+      disease.treatmentStatus = 'pending'
+    } else if (stage === 'treatment') {
+      disease.treatmentStatus = 'processing'
+    } else if (stage === 'reinspection') {
+      disease.treatmentStatus = 'completed'
+    }
+
+    touchSolution()
+    return true
+  }
+
+  function setTreatmentStatus(diseaseId: string, status: TreatmentStatus): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    disease.treatmentStatus = status
+    touchSolution()
+    return true
+  }
+
+  function clearAllDiseases(): boolean {
+    if (!currentSolution.value) return false
+    currentSolution.value.diseases = []
+    workspaceStore.selectDisease(null)
+    touchSolution()
+    return true
+  }
+
+  function getAreaComparison(diseaseId: string): { initialArea: number; currentArea: number; change: number; changeRate: number } | null {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return null
+
+    const initialRecord = disease.stageRecords.find(r => r.stage === 'initial')
+    const initialArea = initialRecord?.area || disease.area
+    const currentArea = disease.area
+
+    const change = currentArea - initialArea
+    const changeRate = initialArea > 0 ? (change / initialArea) * 100 : 0
+
+    return {
+      initialArea,
+      currentArea,
+      change,
+      changeRate: Math.round(changeRate * 100) / 100
+    }
+  }
+
   return {
     solutions,
     currentSolutionId,
@@ -895,6 +1109,10 @@ export const useSolutionStore = defineStore('solution', () => {
     activeLayer,
     sortedLayers,
     visibleLayers,
+    diseases,
+    visibleDiseases,
+    filteredDiseases,
+    selectedDisease,
     historicalPeriods,
     selectedPeriodIds,
     sortedHistoricalPeriods,
@@ -937,6 +1155,18 @@ export const useSolutionStore = defineStore('solution', () => {
     calculateColorStatsByPeriod,
     calculateColorStatsForLayers,
     generateRestorationReport,
-    exportRestorationReport
+    exportRestorationReport,
+    addDisease,
+    updateDisease,
+    deleteDisease,
+    toggleDiseaseVisible,
+    setAllDiseasesVisible,
+    addStageRecord,
+    updateStageRecord,
+    deleteStageRecord,
+    setDiseaseStage,
+    setTreatmentStatus,
+    clearAllDiseases,
+    getAreaComparison
   }
 })

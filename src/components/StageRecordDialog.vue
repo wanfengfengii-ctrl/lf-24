@@ -159,6 +159,7 @@ import {
   DISEASE_STAGE_LABELS,
   DISEASE_SEVERITY_LABELS
 } from '../types'
+import { generateId } from '../utils/id'
 
 interface Props {
   show: boolean
@@ -227,10 +228,6 @@ const severityOptions = [
   { label: DISEASE_SEVERITY_LABELS[4], value: 4 },
   { label: DISEASE_SEVERITY_LABELS[5], value: 5 }
 ]
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9)
-}
 
 watch(
   () => props.show,

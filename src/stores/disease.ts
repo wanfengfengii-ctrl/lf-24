@@ -1,10 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import type {
   DiseaseAnnotation,
   DiseaseType,
   DiseaseSeverity,
-  DiseasePoint,
   DiseaseTypeStat,
   DiseaseSeverityStat,
   DiseaseReport,
@@ -14,8 +13,7 @@ import type {
   TreatmentStatus,
   TreatmentStatusStat,
   DiseaseLedgerItem,
-  DiseaseRecheckReport,
-  DiseasePhotoAttachment
+  DiseaseRecheckReport
 } from '../types'
 import {
   DISEASE_TYPE_LABELS,
@@ -29,89 +27,25 @@ import {
   TREATMENT_STATUS_COLORS
 } from '../types'
 import { useSolutionStore } from './solution'
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9)
-}
-
-function calculatePolygonArea(points: DiseasePoint[]): number {
-  if (points.length < 3) return 0
-  let area = 0
-  for (let i = 0; i < points.length; i++) {
-    const j = (i + 1) % points.length
-    area += points[i].x * points[j].y
-    area -= points[j].x * points[i].y
-  }
-  return Math.abs(area / 2)
-}
-
-function calculateBoundingBox(points: DiseasePoint[]): { left: number; top: number; width: number; height: number } {
-  if (points.length === 0) {
-    return { left: 0, top: 0, width: 0, height: 0 }
-  }
-  let minX = points[0].x
-  let minY = points[0].y
-  let maxX = points[0].x
-  let maxY = points[0].y
-
-  for (const point of points) {
-    minX = Math.min(minX, point.x)
-    minY = Math.min(minY, point.y)
-    maxX = Math.max(maxX, point.x)
-    maxY = Math.max(maxY, point.y)
-  }
-
-  return {
-    left: minX,
-    top: minY,
-    width: maxX - minX,
-    height: maxY - minY
-  }
-}
-
-function calculateArea(shapeType: DiseaseAnnotation['shapeType'], points: DiseasePoint[]): number {
-  if (shapeType === 'rect' && points.length >= 2) {
-    const width = Math.abs(points[1].x - points[0].x)
-    const height = Math.abs(points[1].y - points[0].y)
-    return width * height
-  }
-  return calculatePolygonArea(points)
-}
+import { useWorkspaceStore } from './workspace'
 
 export const useDiseaseStore = defineStore('disease', () => {
   const solutionStore = useSolutionStore()
+  const workspaceStore = useWorkspaceStore()
 
-  const selectedDiseaseId = ref<string | null>(null)
-  const filterType = ref<DiseaseType | 'all'>('all')
-  const filterSeverity = ref<DiseaseSeverity | 'all'>('all')
-  const filterStage = ref<DiseaseStage | 'all'>('all')
-  const filterTreatmentStatus = ref<TreatmentStatus | 'all'>('all')
-  const isDrawingDisease = ref(false)
-  const drawingShapeType = ref<'rect' | 'polygon' | 'freehand'>('rect')
-  const drawingPoints = ref<DiseasePoint[]>([])
-  const diseaseVisible = ref(true)
-
-  const diseases = computed(() => {
-    return solutionStore.currentSolution?.diseases || []
-  })
-
-  const visibleDiseases = computed(() => {
-    return diseases.value.filter(d => d.visible)
-  })
-
-  const filteredDiseases = computed(() => {
-    return visibleDiseases.value.filter(d => {
-      if (filterType.value !== 'all' && !d.types.includes(filterType.value)) return false
-      if (filterSeverity.value !== 'all' && d.severity !== filterSeverity.value) return false
-      if (filterStage.value !== 'all' && d.currentStage !== filterStage.value) return false
-      if (filterTreatmentStatus.value !== 'all' && d.treatmentStatus !== filterTreatmentStatus.value) return false
-      return true
-    })
-  })
-
-  const selectedDisease = computed(() => {
-    return diseases.value.find(d => d.id === selectedDiseaseId.value) || null
-  })
+  const diseases = computed(() => solutionStore.diseases)
+  const visibleDiseases = computed(() => solutionStore.visibleDiseases)
+  const filteredDiseases = computed(() => solutionStore.filteredDiseases)
+  const selectedDiseaseId = computed(() => workspaceStore.selectedDiseaseId)
+  const selectedDisease = computed(() => solutionStore.selectedDisease)
+  const filterType = computed(() => workspaceStore.filterType)
+  const filterSeverity = computed(() => workspaceStore.filterSeverity)
+  const filterStage = computed(() => workspaceStore.filterStage)
+  const filterTreatmentStatus = computed(() => workspaceStore.filterTreatmentStatus)
+  const diseaseVisible = computed(() => workspaceStore.diseaseVisible)
+  const isDrawingDisease = computed(() => workspaceStore.isDrawingDisease)
+  const drawingShapeType = computed(() => workspaceStore.drawingShapeType)
+  const drawingPoints = computed(() => workspaceStore.drawingPoints)
 
   const totalDiseaseArea = computed(() => {
     return visibleDiseases.value.reduce((sum, d) => sum + d.area, 0)
@@ -268,157 +202,54 @@ export const useDiseaseStore = defineStore('disease', () => {
     description?: string
     treatmentSuggestion?: string
     shapeType: 'rect' | 'polygon' | 'freehand'
-    points: DiseasePoint[]
+    points: { x: number; y: number }[]
   }): DiseaseAnnotation | null {
-    if (!solutionStore.currentSolution) return null
-
-    const area = calculateArea(data.shapeType, data.points)
-    const boundingBox = calculateBoundingBox(data.points)
-    const types = data.types && data.types.length > 0 ? data.types : [data.primaryType]
-
-    const disease: DiseaseAnnotation = {
-      id: generateId(),
-      name: data.name || `${DISEASE_TYPE_LABELS[data.primaryType]} ${diseases.value.length + 1}`,
-      types,
-      primaryType: data.primaryType,
-      severity: data.severity,
-      description: data.description || '',
-      discoveredAt: Date.now(),
-      treatmentSuggestion: data.treatmentSuggestion || '',
-      shapeType: data.shapeType,
-      points: data.points,
-      boundingBox,
-      area: Math.round(area),
-      color: DISEASE_TYPE_COLORS[data.primaryType],
-      visible: true,
-      currentStage: 'initial',
-      stageRecords: [],
-      treatmentStatus: 'pending'
-    }
-
-    const initialRecord: DiseaseStageRecord = {
-      id: generateId(),
-      stage: 'initial',
-      inspectorName: '',
-      inspectTime: Date.now(),
-      photos: [],
-      conclusion: data.description || '',
-      treatmentOpinion: data.treatmentSuggestion || '',
-      area: Math.round(area),
-      severity: data.severity
-    }
-
-    disease.stageRecords.push(initialRecord)
-
-    solutionStore.currentSolution.diseases.push(disease)
-    selectedDiseaseId.value = disease.id
-    solutionStore.currentSolution.updatedAt = Date.now()
-
-    return disease
+    return solutionStore.addDisease(data)
   }
 
   function updateDisease(diseaseId: string, updates: Partial<Omit<DiseaseAnnotation, 'id' | 'area' | 'boundingBox'>>): boolean {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return false
-
-    Object.assign(disease, updates)
-
-    if (updates.points || updates.shapeType) {
-      const shapeType = updates.shapeType || disease.shapeType
-      const points = updates.points || disease.points
-      disease.area = Math.round(calculateArea(shapeType, points))
-      disease.boundingBox = calculateBoundingBox(points)
-    }
-
-    if (updates.primaryType) {
-      disease.color = DISEASE_TYPE_COLORS[updates.primaryType]
-    }
-
-    if (updates.types && updates.types.length > 0 && !updates.primaryType) {
-      if (!updates.types.includes(disease.primaryType)) {
-        disease.primaryType = updates.types[0]
-        disease.color = DISEASE_TYPE_COLORS[updates.types[0]]
-      }
-    }
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    return solutionStore.updateDisease(diseaseId, updates)
   }
 
   function deleteDisease(diseaseId: string): boolean {
-    if (!solutionStore.currentSolution) return false
-
-    const index = solutionStore.currentSolution.diseases.findIndex(d => d.id === diseaseId)
-    if (index === -1) return false
-
-    solutionStore.currentSolution.diseases.splice(index, 1)
-
-    if (selectedDiseaseId.value === diseaseId) {
-      selectedDiseaseId.value = null
-    }
-
-    solutionStore.currentSolution.updatedAt = Date.now()
-    return true
+    return solutionStore.deleteDisease(diseaseId)
   }
 
   function toggleDiseaseVisible(diseaseId: string): boolean {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return false
-
-    disease.visible = !disease.visible
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    return solutionStore.toggleDiseaseVisible(diseaseId)
   }
 
   function setAllDiseasesVisible(visible: boolean): boolean {
-    if (!solutionStore.currentSolution) return false
-
-    for (const disease of solutionStore.currentSolution.diseases) {
-      disease.visible = visible
-    }
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    workspaceStore.setDiseaseVisible(visible)
+    return solutionStore.setAllDiseasesVisible(visible)
   }
 
   function selectDisease(diseaseId: string | null) {
-    selectedDiseaseId.value = diseaseId
+    workspaceStore.selectDisease(diseaseId)
   }
 
   function setFilterType(type: DiseaseType | 'all') {
-    filterType.value = type
+    workspaceStore.setFilterType(type)
   }
 
   function setFilterSeverity(severity: DiseaseSeverity | 'all') {
-    filterSeverity.value = severity
+    workspaceStore.setFilterSeverity(severity)
   }
 
   function setDiseaseVisible(visible: boolean) {
-    diseaseVisible.value = visible
-    setAllDiseasesVisible(visible)
+    workspaceStore.setDiseaseVisible(visible)
+    solutionStore.setAllDiseasesVisible(visible)
   }
 
   function startDrawing(shapeType: 'rect' | 'polygon' | 'freehand') {
-    isDrawingDisease.value = true
-    drawingShapeType.value = shapeType
-    drawingPoints.value = []
+    workspaceStore.startDrawingDisease(shapeType)
   }
 
-  function addDrawingPoint(point: DiseasePoint) {
-    drawingPoints.value.push(point)
+  function addDrawingPoint(point: { x: number; y: number }) {
+    workspaceStore.addDrawingPoint(point)
   }
 
-  function finishDrawing(primaryType: DiseaseType, severity: DiseaseSeverity, customPoints?: DiseasePoint[], types?: DiseaseType[]): DiseaseAnnotation | null {
+  function finishDrawing(primaryType: DiseaseType, severity: DiseaseSeverity, customPoints?: { x: number; y: number }[], types?: DiseaseType[]): DiseaseAnnotation | null {
     const points = customPoints || drawingPoints.value
 
     if (points.length < 2) {
@@ -434,135 +265,43 @@ export const useDiseaseStore = defineStore('disease', () => {
       points: [...points]
     })
 
-    isDrawingDisease.value = false
-    drawingPoints.value = []
+    workspaceStore.cancelDrawingDisease()
 
     return disease
   }
 
   function cancelDrawing() {
-    isDrawingDisease.value = false
-    drawingPoints.value = []
+    workspaceStore.cancelDrawingDisease()
   }
 
   function addStageRecord(diseaseId: string, data: {
     stage: DiseaseStage
     inspectorName: string
     inspectTime?: number
-    photos?: DiseasePhotoAttachment[]
+    photos?: any[]
     conclusion: string
     treatmentOpinion: string
     area?: number
     severity?: DiseaseSeverity
     notes?: string
   }): DiseaseStageRecord | null {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return null
-
-    const record: DiseaseStageRecord = {
-      id: generateId(),
-      stage: data.stage,
-      inspectorName: data.inspectorName,
-      inspectTime: data.inspectTime || Date.now(),
-      photos: data.photos || [],
-      conclusion: data.conclusion,
-      treatmentOpinion: data.treatmentOpinion,
-      area: data.area,
-      severity: data.severity,
-      notes: data.notes
-    }
-
-    disease.stageRecords.push(record)
-    disease.currentStage = data.stage
-
-    if (data.stage === 'treatment') {
-      disease.treatmentStatus = 'processing'
-    } else if (data.stage === 'reinspection') {
-      disease.treatmentStatus = 'completed'
-    }
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return record
+    return solutionStore.addStageRecord(diseaseId, data)
   }
 
   function updateStageRecord(diseaseId: string, recordId: string, updates: Partial<Omit<DiseaseStageRecord, 'id' | 'stage'>>): boolean {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return false
-
-    const record = disease.stageRecords.find(r => r.id === recordId)
-    if (!record) return false
-
-    Object.assign(record, updates)
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    return solutionStore.updateStageRecord(diseaseId, recordId, updates)
   }
 
   function deleteStageRecord(diseaseId: string, recordId: string): boolean {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return false
-
-    const index = disease.stageRecords.findIndex(r => r.id === recordId)
-    if (index === -1) return false
-
-    disease.stageRecords.splice(index, 1)
-
-    if (disease.stageRecords.length > 0) {
-      const latestRecord = disease.stageRecords.reduce((latest, r) =>
-        r.inspectTime > latest.inspectTime ? r : latest
-      )
-      disease.currentStage = latestRecord.stage
-    } else {
-      disease.currentStage = 'initial'
-    }
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    return solutionStore.deleteStageRecord(diseaseId, recordId)
   }
 
   function setDiseaseStage(diseaseId: string, stage: DiseaseStage): boolean {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return false
-
-    disease.currentStage = stage
-
-    if (stage === 'initial') {
-      disease.treatmentStatus = 'pending'
-    } else if (stage === 'recheck') {
-      disease.treatmentStatus = 'pending'
-    } else if (stage === 'treatment') {
-      disease.treatmentStatus = 'processing'
-    } else if (stage === 'reinspection') {
-      disease.treatmentStatus = 'completed'
-    }
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    return solutionStore.setDiseaseStage(diseaseId, stage)
   }
 
   function setTreatmentStatus(diseaseId: string, status: TreatmentStatus): boolean {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return false
-
-    disease.treatmentStatus = status
-
-    if (solutionStore.currentSolution) {
-      solutionStore.currentSolution.updatedAt = Date.now()
-    }
-
-    return true
+    return solutionStore.setTreatmentStatus(diseaseId, status)
   }
 
   function getStageRecords(diseaseId: string, stage?: DiseaseStage): DiseaseStageRecord[] {
@@ -584,30 +323,15 @@ export const useDiseaseStore = defineStore('disease', () => {
   }
 
   function getAreaComparison(diseaseId: string): { initialArea: number; currentArea: number; change: number; changeRate: number } | null {
-    const disease = diseases.value.find(d => d.id === diseaseId)
-    if (!disease) return null
-
-    const initialRecord = disease.stageRecords.find(r => r.stage === 'initial')
-    const initialArea = initialRecord?.area || disease.area
-    const currentArea = disease.area
-
-    const change = currentArea - initialArea
-    const changeRate = initialArea > 0 ? (change / initialArea) * 100 : 0
-
-    return {
-      initialArea,
-      currentArea,
-      change,
-      changeRate: Math.round(changeRate * 100) / 100
-    }
+    return solutionStore.getAreaComparison(diseaseId)
   }
 
   function setFilterStage(stage: DiseaseStage | 'all') {
-    filterStage.value = stage
+    workspaceStore.setFilterStage(stage)
   }
 
   function setFilterTreatmentStatus(status: TreatmentStatus | 'all') {
-    filterTreatmentStatus.value = status
+    workspaceStore.setFilterTreatmentStatus(status)
   }
 
   function generateRecheckReport(): DiseaseRecheckReport | null {
@@ -764,11 +488,7 @@ export const useDiseaseStore = defineStore('disease', () => {
   }
 
   function clearAllDiseases(): boolean {
-    if (!solutionStore.currentSolution) return false
-    solutionStore.currentSolution.diseases = []
-    selectedDiseaseId.value = null
-    solutionStore.currentSolution.updatedAt = Date.now()
-    return true
+    return solutionStore.clearAllDiseases()
   }
 
   return {
