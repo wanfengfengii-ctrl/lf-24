@@ -7,6 +7,14 @@ export interface HistoricalPeriod {
   color: string
 }
 
+export interface LayerVersion {
+  periodId: string | null
+  objects: FabricObjectData[]
+  materialDescription: string
+  deductionBasis: string
+  confidence: number
+}
+
 export interface LayerHistoricalInfo {
   periodId: string | null
   materialDescription: string
@@ -23,6 +31,7 @@ export interface Layer {
   objects: FabricObjectData[]
   zIndex: number
   historicalInfo: LayerHistoricalInfo
+  versions: LayerVersion[]
 }
 
 export interface FabricObjectData {

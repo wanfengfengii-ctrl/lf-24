@@ -36,7 +36,7 @@ const emit = defineEmits<{
 }>()
 
 const solutionStore = useSolutionStore()
-const { currentSolution, activeLayer, sortedLayers, visibleFilteredLayers, selectedPeriodIds } = storeToRefs(solutionStore)
+const { currentSolution, activeLayer, sortedLayers, visibleLayers, visibleFilteredLayers, selectedPeriodIds, activePeriodId } = storeToRefs(solutionStore)
 const dialog = useDialog()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -118,10 +118,24 @@ function loadLineArt() {
 }
 
 function getRenderLayers() {
-  if (props.enablePeriodFilter && selectedPeriodIds.value.length > 0) {
+  if (props.enablePeriodFilter) {
+    return visibleLayers.value
+  }
+  if (selectedPeriodIds.value.length > 0) {
     return visibleFilteredLayers.value
   }
   return sortedLayers.value
+}
+
+function getLayerObjects(layer: any): any[] {
+  if (props.enablePeriodFilter && activePeriodId.value) {
+    const version = layer.versions?.find((v: any) => v.periodId === activePeriodId.value)
+    if (version) {
+      return version.objects
+    }
+    return []
+  }
+  return layer.objects
 }
 
 function renderAllLayers() {
@@ -140,7 +154,8 @@ function renderAllLayers() {
   const layers = [...getRenderLayers()].sort((a, b) => a.zIndex - b.zIndex)
 
   for (const layer of layers) {
-    for (const objData of layer.objects) {
+    const objects = getLayerObjects(layer)
+    for (const objData of objects) {
       try {
         const fabricObj = createFabricObjectFromData(objData)
         if (fabricObj) {
@@ -399,7 +414,12 @@ function saveActiveLayerObjects() {
   })
 
   const objectData = objects.map((obj: any) => obj.toObject(['data']))
-  solutionStore.setLayerObjects(activeLayer.value.id, objectData)
+
+  if (props.enablePeriodFilter && activePeriodId.value) {
+    solutionStore.setLayerVersionObjects(activeLayer.value.id, activePeriodId.value, objectData)
+  } else {
+    solutionStore.setLayerObjects(activeLayer.value.id, objectData)
+  }
   emit('objects-updated')
 }
 
@@ -506,6 +526,12 @@ watch(selectedPeriodIds, () => {
     renderAllLayers()
   }
 }, { deep: true })
+
+watch(activePeriodId, () => {
+  if (props.enablePeriodFilter) {
+    renderAllLayers()
+  }
+})
 
 onMounted(() => {
   nextTick(() => {

@@ -75,17 +75,23 @@ const props = defineProps<{
 }>()
 
 const solutionStore = useSolutionStore()
-const { visibleLayers, visibleFilteredLayers, selectedPeriodIds } = storeToRefs(solutionStore)
+const { visibleLayers, visibleFilteredLayers, selectedPeriodIds, activePeriodId } = storeToRefs(solutionStore)
 
 const effectiveLayers = computed(() => {
-  if (props.enablePeriodFilter && selectedPeriodIds.value.length > 0) {
+  if (props.enablePeriodFilter) {
+    return visibleLayers.value
+  }
+  if (selectedPeriodIds.value.length > 0) {
     return visibleFilteredLayers.value
   }
   return visibleLayers.value
 })
 
 const stats = computed(() => {
-  if (props.enablePeriodFilter && selectedPeriodIds.value.length > 0) {
+  if (props.enablePeriodFilter && activePeriodId.value) {
+    return solutionStore.calculateColorStatsForLayers(effectiveLayers.value, activePeriodId.value)
+  }
+  if (selectedPeriodIds.value.length > 0) {
     return solutionStore.calculateColorStatsForLayers(effectiveLayers.value)
   }
   return solutionStore.calculateColorAreaStats()

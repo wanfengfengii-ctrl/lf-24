@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Solution, Layer, LayerType, ColorAreaStat, HistoricalPeriod, LayerHistoricalInfo, PeriodColorStat, RestorationReport } from '../types'
+import type { Solution, Layer, LayerType, ColorAreaStat, HistoricalPeriod, LayerHistoricalInfo, LayerVersion, PeriodColorStat, RestorationReport, FabricObjectData } from '../types'
 import { LAYER_TYPE_LABELS, DEFAULT_HISTORICAL_PERIODS } from '../types'
 
 function generateId(): string {
@@ -11,6 +11,7 @@ export const useSolutionStore = defineStore('solution', () => {
   const solutions = ref<Solution[]>([])
   const currentSolutionId = ref<string | null>(null)
   const activeLayerId = ref<string | null>(null)
+  const activePeriodId = ref<string | null>(null)
   const compareSolutionIds = ref<string[]>([])
 
   const currentSolution = computed(() => {
@@ -59,7 +60,17 @@ export const useSolutionStore = defineStore('solution', () => {
       { type: 'pattern', name: '纹样层 1' },
       { type: 'outline', name: '描边层 1' }
     ]
+    const firstPeriodId = historicalPeriods[0]?.id || null
+
     defaultLayers.forEach((layer, index) => {
+      const versions: LayerVersion[] = historicalPeriods.map(p => ({
+        periodId: p.id,
+        objects: [],
+        materialDescription: '',
+        deductionBasis: '',
+        confidence: 50
+      }))
+
       const newLayer: Layer = {
         id: generateId(),
         name: layer.name,
@@ -69,11 +80,12 @@ export const useSolutionStore = defineStore('solution', () => {
         objects: [],
         zIndex: index,
         historicalInfo: {
-          periodId: historicalPeriods[0]?.id || null,
+          periodId: firstPeriodId,
           materialDescription: '',
           deductionBasis: '',
           confidence: 50
-        }
+        },
+        versions
       }
       solution.layers.push(newLayer)
     })
@@ -82,6 +94,7 @@ export const useSolutionStore = defineStore('solution', () => {
       const sorted = [...solution.layers].sort((a, b) => a.zIndex - b.zIndex)
       activeLayerId.value = sorted[sorted.length - 1].id
     }
+    activePeriodId.value = firstPeriodId
 
     return solution
   }
@@ -96,6 +109,7 @@ export const useSolutionStore = defineStore('solution', () => {
       } else {
         activeLayerId.value = null
       }
+      activePeriodId.value = solution.historicalPeriods[0]?.id || null
     }
   }
 
@@ -135,15 +149,23 @@ export const useSolutionStore = defineStore('solution', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       lineArt: source.lineArt,
-      layers: source.layers.map(l => ({
-        ...l,
-        id: generateId(),
-        objects: JSON.parse(JSON.stringify(l.objects)),
-        historicalInfo: {
-          ...l.historicalInfo,
-          periodId: l.historicalInfo.periodId ? periodIdMap.get(l.historicalInfo.periodId) || null : null
+      layers: source.layers.map(l => {
+        const newVersions = (l.versions || []).map(v => ({
+          ...v,
+          objects: JSON.parse(JSON.stringify(v.objects)),
+          periodId: v.periodId ? periodIdMap.get(v.periodId) || null : null
+        }))
+        return {
+          ...l,
+          id: generateId(),
+          objects: JSON.parse(JSON.stringify(l.objects)),
+          historicalInfo: {
+            ...l.historicalInfo,
+            periodId: l.historicalInfo.periodId ? periodIdMap.get(l.historicalInfo.periodId) || null : null
+          },
+          versions: newVersions
         }
-      })),
+      }),
       canvasWidth: source.canvasWidth,
       canvasHeight: source.canvasHeight,
       historicalPeriods: newPeriods,
@@ -167,6 +189,14 @@ export const useSolutionStore = defineStore('solution', () => {
 
     const firstPeriodId = currentSolution.value.historicalPeriods[0]?.id || null
 
+    const versions: LayerVersion[] = currentSolution.value.historicalPeriods.map(p => ({
+      periodId: p.id,
+      objects: [],
+      materialDescription: '',
+      deductionBasis: '',
+      confidence: 50
+    }))
+
     const layer: Layer = {
       id: generateId(),
       name: layerName,
@@ -180,7 +210,8 @@ export const useSolutionStore = defineStore('solution', () => {
         materialDescription: '',
         deductionBasis: '',
         confidence: 50
-      }
+      },
+      versions
     }
 
     currentSolution.value.layers.push(layer)
@@ -364,10 +395,29 @@ export const useSolutionStore = defineStore('solution', () => {
             periodId: periodIdMap.get(historicalInfo.periodId) || null
           }
         }
+
+        let versions: LayerVersion[] = []
+        if (l.versions && Array.isArray(l.versions)) {
+          versions = l.versions.map((v: any) => ({
+            ...v,
+            periodId: v.periodId ? periodIdMap.get(v.periodId) || v.periodId : null,
+            objects: v.objects ? JSON.parse(JSON.stringify(v.objects)) : []
+          }))
+        } else {
+          versions = historicalPeriods.map(p => ({
+            periodId: p.id,
+            objects: p.id === historicalInfo.periodId && l.objects ? JSON.parse(JSON.stringify(l.objects)) : [],
+            materialDescription: p.id === historicalInfo.periodId ? historicalInfo.materialDescription : '',
+            deductionBasis: p.id === historicalInfo.periodId ? historicalInfo.deductionBasis : '',
+            confidence: p.id === historicalInfo.periodId ? historicalInfo.confidence : 50
+          }))
+        }
+
         return {
           ...l,
           id: generateId(),
-          historicalInfo
+          historicalInfo,
+          versions
         }
       })
 
@@ -430,56 +480,6 @@ export const useSolutionStore = defineStore('solution', () => {
     compareSolutionIds.value = []
   }
 
-  function calculateColorAreaStats(): ColorAreaStat[] {
-    if (!currentSolution.value) return []
-    
-    const stats: Map<string, number> = new Map()
-    let totalArea = 0
-
-    for (const layer of visibleLayers.value) {
-      for (const obj of layer.objects) {
-        const color = obj.fill || obj.stroke
-        if (!color || typeof color !== 'string') continue
-        if (color === 'transparent' || color === 'none') continue
-
-        let area = 0
-        if (obj.type === 'rect') {
-          area = (obj.width || 0) * (obj.height || 0)
-        } else if (obj.type === 'circle') {
-          area = Math.PI * Math.pow(obj.radius || 0, 2)
-        } else if (obj.type === 'ellipse') {
-          area = Math.PI * (obj.rx || 0) * (obj.ry || 0)
-        } else if (obj.type === 'polygon' || obj.type === 'polyline') {
-          area = calculatePolygonArea(obj.points || [])
-        } else if (obj.type === 'path') {
-          area = (obj.width || 0) * (obj.height || 0) * 0.5
-        } else {
-          area = (obj.width || 0) * (obj.height || 0)
-        }
-
-        const opacityFactor = (layer.opacity / 100) * (obj.opacity || 1)
-        area = area * opacityFactor
-
-        if (area > 0) {
-          const normalizedColor = color.toLowerCase()
-          stats.set(normalizedColor, (stats.get(normalizedColor) || 0) + area)
-          totalArea += area
-        }
-      }
-    }
-
-    const result: ColorAreaStat[] = []
-    for (const [color, area] of stats) {
-      result.push({
-        color,
-        area: Math.round(area),
-        percentage: totalArea > 0 ? Math.round((area / totalArea) * 10000) / 100 : 0
-      })
-    }
-
-    return result.sort((a, b) => b.area - a.area)
-  }
-
   function calculatePolygonArea(points: { x: number; y: number }[]): number {
     if (points.length < 3) return 0
     let area = 0
@@ -529,6 +529,19 @@ export const useSolutionStore = defineStore('solution', () => {
     }
     currentSolution.value.historicalPeriods.push(newPeriod)
     currentSolution.value.selectedPeriodIds.push(newPeriod.id)
+
+    for (const layer of currentSolution.value.layers) {
+      if (!layer.versions.find(v => v.periodId === newPeriod.id)) {
+        layer.versions.push({
+          periodId: newPeriod.id,
+          objects: [],
+          materialDescription: '',
+          deductionBasis: '',
+          confidence: 50
+        })
+      }
+    }
+
     currentSolution.value.updatedAt = Date.now()
     return newPeriod
   }
@@ -548,11 +561,21 @@ export const useSolutionStore = defineStore('solution', () => {
     if (index === -1) return false
     currentSolution.value.historicalPeriods.splice(index, 1)
     currentSolution.value.selectedPeriodIds = currentSolution.value.selectedPeriodIds.filter(id => id !== periodId)
+
     for (const layer of currentSolution.value.layers) {
       if (layer.historicalInfo.periodId === periodId) {
         layer.historicalInfo.periodId = null
       }
+      const versionIndex = layer.versions.findIndex(v => v.periodId === periodId)
+      if (versionIndex !== -1) {
+        layer.versions.splice(versionIndex, 1)
+      }
     }
+
+    if (activePeriodId.value === periodId) {
+      activePeriodId.value = currentSolution.value.historicalPeriods[0]?.id || null
+    }
+
     currentSolution.value.updatedAt = Date.now()
     return true
   }
@@ -578,17 +601,99 @@ export const useSolutionStore = defineStore('solution', () => {
     if (!currentSolution.value) return false
     const layer = currentSolution.value.layers.find(l => l.id === layerId)
     if (!layer) return false
-    layer.historicalInfo = { ...layer.historicalInfo, ...info }
+    const newInfo = { ...layer.historicalInfo, ...info }
+    if (info.confidence !== undefined) {
+      newInfo.confidence = Math.max(0, Math.min(100, info.confidence))
+    }
+    layer.historicalInfo = newInfo
     currentSolution.value.updatedAt = Date.now()
     return true
   }
 
-  function calculateColorStatsForLayers(targetLayers: Layer[]): ColorAreaStat[] {
+  function getLayerVersion(layerId: string, periodId: string | null): LayerVersion | null {
+    const layer = layers.value.find(l => l.id === layerId)
+    if (!layer) return null
+    if (!periodId) return null
+    const version = layer.versions.find(v => v.periodId === periodId)
+    return version || null
+  }
+
+  function setActivePeriod(periodId: string | null) {
+    activePeriodId.value = periodId
+  }
+
+  function getActiveLayerVersionObjects(): FabricObjectData[] {
+    if (!activeLayerId.value || !activePeriodId.value) return []
+    const version = getLayerVersion(activeLayerId.value, activePeriodId.value)
+    return version ? version.objects : []
+  }
+
+  function setLayerVersionObjects(layerId: string, periodId: string | null, objects: FabricObjectData[]): boolean {
+    if (!currentSolution.value || !periodId) return false
+    const layer = currentSolution.value.layers.find(l => l.id === layerId)
+    if (!layer) return false
+
+    let version = layer.versions.find(v => v.periodId === periodId)
+    if (!version) {
+      version = {
+        periodId,
+        objects: [],
+        materialDescription: '',
+        deductionBasis: '',
+        confidence: 50
+      }
+      layer.versions.push(version)
+    }
+    version.objects = objects
+    currentSolution.value.updatedAt = Date.now()
+    return true
+  }
+
+  function setLayerVersionInfo(layerId: string, periodId: string | null, info: Partial<Omit<LayerVersion, 'periodId' | 'objects'>>): boolean {
+    if (!currentSolution.value || !periodId) return false
+    const layer = currentSolution.value.layers.find(l => l.id === layerId)
+    if (!layer) return false
+
+    let version = layer.versions.find(v => v.periodId === periodId)
+    if (!version) {
+      version = {
+        periodId,
+        objects: [],
+        materialDescription: '',
+        deductionBasis: '',
+        confidence: 50
+      }
+      layer.versions.push(version)
+    }
+
+    if (info.confidence !== undefined) {
+      version.confidence = Math.max(0, Math.min(100, info.confidence))
+    }
+    if (info.materialDescription !== undefined) {
+      version.materialDescription = info.materialDescription
+    }
+    if (info.deductionBasis !== undefined) {
+      version.deductionBasis = info.deductionBasis
+    }
+
+    currentSolution.value.updatedAt = Date.now()
+    return true
+  }
+
+  function calculateColorStatsForLayers(targetLayers: Layer[], periodId?: string | null): ColorAreaStat[] {
     const stats: Map<string, number> = new Map()
     let totalArea = 0
 
     for (const layer of targetLayers) {
-      for (const obj of layer.objects) {
+      let objects = layer.objects
+      if (periodId) {
+        const version = layer.versions.find(v => v.periodId === periodId)
+        if (version) {
+          objects = version.objects
+        }
+      }
+
+      for (const obj of objects) {
         const color = obj.fill || obj.stroke
         if (!color || typeof color !== 'string') continue
         if (color === 'transparent' || color === 'none') continue
@@ -631,16 +736,21 @@ export const useSolutionStore = defineStore('solution', () => {
     return result.sort((a, b) => b.area - a.area)
   }
 
+  function calculateColorAreaStats(): ColorAreaStat[] {
+    if (!currentSolution.value) return []
+    if (activePeriodId.value) {
+      return calculateColorStatsForLayers(visibleLayers.value, activePeriodId.value)
+    }
+    return calculateColorStatsForLayers(visibleLayers.value)
+  }
+
   function calculateColorStatsByPeriod(): PeriodColorStat[] {
     if (!currentSolution.value) return []
 
     const result: PeriodColorStat[] = []
 
     for (const period of sortedHistoricalPeriods.value) {
-      const periodLayers = visibleLayers.value.filter(
-        layer => layer.historicalInfo.periodId === period.id
-      )
-      const stats = calculateColorStatsForLayers(periodLayers)
+      const stats = calculateColorStatsForLayers(visibleLayers.value, period.id)
       const totalArea = stats.reduce((sum, s) => sum + s.area, 0)
 
       result.push({
@@ -661,22 +771,30 @@ export const useSolutionStore = defineStore('solution', () => {
     const periods: RestorationReport['periods'] = []
 
     for (const period of sortedHistoricalPeriods.value) {
-      const periodLayers = [...sortedLayers.value].filter(
-        layer => layer.historicalInfo.periodId === period.id
-      )
+      const periodLayers = [...sortedLayers.value]
 
       const layerStats = periodLayers.map(layer => {
-        const colorStats = calculateColorStatsForLayers([layer].filter(l => l.visible))
+        const colorStats = calculateColorStatsForLayers([layer].filter(l => l.visible), period.id)
         const totalArea = colorStats.reduce((sum, s) => sum + s.area, 0)
+        const version = layer.versions.find(v => v.periodId === period.id)
+        const layerWithVersion = {
+          ...layer,
+          historicalInfo: {
+            periodId: period.id,
+            materialDescription: version?.materialDescription || '',
+            deductionBasis: version?.deductionBasis || '',
+            confidence: version?.confidence || 50
+          }
+        }
         return {
-          layer,
+          layer: layerWithVersion,
           colorStats,
           totalArea
         }
       })
 
       const visiblePeriodLayers = periodLayers.filter(l => l.visible)
-      const totalColorStats = calculateColorStatsForLayers(visiblePeriodLayers)
+      const totalColorStats = calculateColorStatsForLayers(visiblePeriodLayers, period.id)
       const totalArea = totalColorStats.reduce((sum, s) => sum + s.area, 0)
 
       periods.push({
@@ -709,6 +827,7 @@ export const useSolutionStore = defineStore('solution', () => {
     solutions,
     currentSolutionId,
     activeLayerId,
+    activePeriodId,
     compareSolutionIds,
     currentSolution,
     layers,
@@ -749,6 +868,11 @@ export const useSolutionStore = defineStore('solution', () => {
     togglePeriodSelection,
     setSelectedPeriods,
     setLayerHistoricalInfo,
+    getLayerVersion,
+    setActivePeriod,
+    getActiveLayerVersionObjects,
+    setLayerVersionObjects,
+    setLayerVersionInfo,
     calculateColorStatsByPeriod,
     calculateColorStatsForLayers,
     generateRestorationReport,

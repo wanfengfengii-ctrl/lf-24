@@ -154,7 +154,7 @@ import { storeToRefs } from 'pinia'
 import type { HistoricalPeriod } from '../types'
 
 const solutionStore = useSolutionStore()
-const { sortedHistoricalPeriods, selectedPeriodIds } = storeToRefs(solutionStore)
+const { sortedHistoricalPeriods, selectedPeriodIds, activePeriodId } = storeToRefs(solutionStore)
 const dialog = useDialog()
 const message = useMessage()
 
@@ -177,10 +177,7 @@ const allSelected = computed(() => {
 })
 
 const singleActivePeriod = computed(() => {
-  if (selectedPeriodIds.value.length === 1) {
-    return selectedPeriodIds.value[0]
-  }
-  return null
+  return activePeriodId.value
 })
 
 const minYear = computed(() => {
@@ -223,7 +220,10 @@ function isPeriodSelected(periodId: string): boolean {
 }
 
 function handlePeriodClick(periodId: string) {
-  solutionStore.setSelectedPeriods([periodId])
+  solutionStore.setActivePeriod(periodId)
+  if (!selectedPeriodIds.value.includes(periodId)) {
+    solutionStore.setSelectedPeriods([periodId])
+  }
 }
 
 function togglePeriod(periodId: string) {

@@ -111,53 +111,95 @@
             <div class="section-title">
               <n-icon><time-outline /></n-icon>
               <span>历史属性</span>
+              <span v-if="activePeriodId" class="period-badge" :style="{ backgroundColor: getActivePeriodColor() + '20', color: getActivePeriodColor() }">
+                {{ getActivePeriodName() }}
+              </span>
             </div>
 
-            <div class="setting-item">
-              <span class="setting-label">所属时期</span>
-              <n-select
-                :value="layer.historicalInfo.periodId"
-                :options="periodOptions"
-                placeholder="选择历史时期"
-                size="small"
-                @update:value="(value: string | null) => handlePeriodChange(layer.id, value)"
-              />
-            </div>
+            <template v-if="!activePeriodId">
+              <div class="setting-item">
+                <span class="setting-label">所属时期</span>
+                <n-select
+                  :value="layer.historicalInfo.periodId"
+                  :options="periodOptions"
+                  placeholder="选择历史时期"
+                  size="small"
+                  @update:value="(value: string | null) => handlePeriodChange(layer.id, value)"
+                />
+              </div>
 
-            <div class="setting-item">
-              <span class="setting-label">置信度</span>
-              <n-slider
-                :value="layer.historicalInfo.confidence"
-                :min="0"
-                :max="100"
-                @update:value="(value: number) => handleConfidenceChange(layer.id, value)"
-              />
-              <span class="setting-value">{{ layer.historicalInfo.confidence }}%</span>
-            </div>
+              <div class="setting-item">
+                <span class="setting-label">置信度</span>
+                <n-slider
+                  :value="layer.historicalInfo.confidence"
+                  :min="0"
+                  :max="100"
+                  @update:value="(value: number) => handleConfidenceChange(layer.id, value)"
+                />
+                <span class="setting-value">{{ layer.historicalInfo.confidence }}%</span>
+              </div>
 
-            <div class="setting-item column">
-              <span class="setting-label">材料说明</span>
-              <n-input
-                :value="layer.historicalInfo.materialDescription"
-                type="textarea"
-                :rows="2"
-                placeholder="描述使用的颜料、材料等"
-                size="small"
-                @update:value="(value: string) => handleMaterialChange(layer.id, value)"
-              />
-            </div>
+              <div class="setting-item column">
+                <span class="setting-label">材料说明</span>
+                <n-input
+                  :value="layer.historicalInfo.materialDescription"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="描述使用的颜料、材料等"
+                  size="small"
+                  @update:value="(value: string) => handleMaterialChange(layer.id, value)"
+                />
+              </div>
 
-            <div class="setting-item column">
-              <span class="setting-label">推演依据</span>
-              <n-input
-                :value="layer.historicalInfo.deductionBasis"
-                type="textarea"
-                :rows="2"
-                placeholder="说明色彩推演的依据"
-                size="small"
-                @update:value="(value: string) => handleDeductionBasisChange(layer.id, value)"
-              />
-            </div>
+              <div class="setting-item column">
+                <span class="setting-label">推演依据</span>
+                <n-input
+                  :value="layer.historicalInfo.deductionBasis"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="说明色彩推演的依据"
+                  size="small"
+                  @update:value="(value: string) => handleDeductionBasisChange(layer.id, value)"
+                />
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="setting-item">
+                <span class="setting-label">置信度</span>
+                <n-slider
+                  :value="getLayerVersionConfidence(layer)"
+                  :min="0"
+                  :max="100"
+                  @update:value="(value: number) => handleVersionConfidenceChange(layer.id, value)"
+                />
+                <span class="setting-value">{{ getLayerVersionConfidence(layer) }}%</span>
+              </div>
+
+              <div class="setting-item column">
+                <span class="setting-label">材料说明</span>
+                <n-input
+                  :value="getLayerVersionMaterial(layer)"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="描述使用的颜料、材料等"
+                  size="small"
+                  @update:value="(value: string) => handleVersionMaterialChange(layer.id, value)"
+                />
+              </div>
+
+              <div class="setting-item column">
+                <span class="setting-label">推演依据</span>
+                <n-input
+                  :value="getLayerVersionBasis(layer)"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="说明色彩推演的依据"
+                  size="small"
+                  @update:value="(value: string) => handleVersionBasisChange(layer.id, value)"
+                />
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -187,7 +229,7 @@ import type { LayerType, Layer } from '../types'
 import { LAYER_TYPE_LABELS, LAYER_TYPE_COLORS } from '../types'
 
 const solutionStore = useSolutionStore()
-const { sortedLayers, activeLayerId, sortedHistoricalPeriods } = storeToRefs(solutionStore)
+const { sortedLayers, activeLayerId, sortedHistoricalPeriods, activePeriodId } = storeToRefs(solutionStore)
 const dialog = useDialog()
 
 const showAddMenu = ref(false)
@@ -324,6 +366,53 @@ function handleMaterialChange(layerId: string, description: string) {
 
 function handleDeductionBasisChange(layerId: string, basis: string) {
   solutionStore.setLayerHistoricalInfo(layerId, { deductionBasis: basis })
+}
+
+function getActivePeriodName(): string {
+  if (!activePeriodId.value) return ''
+  const period = sortedHistoricalPeriods.value.find(p => p.id === activePeriodId.value)
+  return period?.name || ''
+}
+
+function getActivePeriodColor(): string {
+  if (!activePeriodId.value) return '#888888'
+  const period = sortedHistoricalPeriods.value.find(p => p.id === activePeriodId.value)
+  return period?.color || '#888888'
+}
+
+function getLayerVersion(layer: Layer) {
+  if (!activePeriodId.value) return null
+  return layer.versions?.find(v => v.periodId === activePeriodId.value) || null
+}
+
+function getLayerVersionConfidence(layer: Layer): number {
+  const version = getLayerVersion(layer)
+  return version?.confidence || 50
+}
+
+function getLayerVersionMaterial(layer: Layer): string {
+  const version = getLayerVersion(layer)
+  return version?.materialDescription || ''
+}
+
+function getLayerVersionBasis(layer: Layer): string {
+  const version = getLayerVersion(layer)
+  return version?.deductionBasis || ''
+}
+
+function handleVersionConfidenceChange(layerId: string, value: number) {
+  if (!activePeriodId.value) return
+  solutionStore.setLayerVersionInfo(layerId, activePeriodId.value, { confidence: value })
+}
+
+function handleVersionMaterialChange(layerId: string, value: string) {
+  if (!activePeriodId.value) return
+  solutionStore.setLayerVersionInfo(layerId, activePeriodId.value, { materialDescription: value })
+}
+
+function handleVersionBasisChange(layerId: string, value: string) {
+  if (!activePeriodId.value) return
+  solutionStore.setLayerVersionInfo(layerId, activePeriodId.value, { deductionBasis: value })
 }
 </script>
 
@@ -466,6 +555,14 @@ function handleDeductionBasisChange(layerId: string, basis: string) {
 
 .section-title n-icon {
   font-size: 14px;
+}
+
+.period-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
 }
 
 .empty-layers {
