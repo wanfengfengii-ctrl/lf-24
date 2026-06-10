@@ -190,6 +190,69 @@ export interface DiseaseSeverityStat {
   color: string
 }
 
+export interface DiseaseStageStat {
+  stage: DiseaseStage
+  stageName: string
+  count: number
+  totalArea: number
+  percentage: number
+  color: string
+}
+
+export type TreatmentStatus = 'pending' | 'processing' | 'completed' | 'closed'
+
+export const TREATMENT_STATUS_LABELS: Record<TreatmentStatus, string> = {
+  pending: '待处置',
+  processing: '处置中',
+  completed: '已完成',
+  closed: '已闭环'
+}
+
+export const TREATMENT_STATUS_COLORS: Record<TreatmentStatus, string> = {
+  pending: '#faad14',
+  processing: '#1677ff',
+  completed: '#52c41a',
+  closed: '#8c8c8c'
+}
+
+export interface TreatmentStatusStat {
+  status: TreatmentStatus
+  statusName: string
+  count: number
+  percentage: number
+  color: string
+}
+
+export interface DiseaseLedgerItem {
+  id: string
+  name: string
+  types: DiseaseType[]
+  primaryType: DiseaseType
+  severity: DiseaseSeverity
+  area: number
+  currentStage: DiseaseStage
+  treatmentStatus: TreatmentStatus
+  discoveredAt: number
+  initialInspector: string
+  lastInspectTime: number
+  stageCount: number
+}
+
+export interface DiseaseRecheckReport {
+  solutionName: string
+  generatedAt: number
+  totalDiseases: number
+  stageStats: DiseaseStageStat[]
+  treatmentStatusStats: TreatmentStatusStat[]
+  areaComparison: {
+    initialTotalArea: number
+    currentTotalArea: number
+    areaChange: number
+    areaChangeRate: number
+  }
+  ledger: DiseaseLedgerItem[]
+}
+
 export interface DiseaseReport {
   solutionName: string
   generatedAt: number

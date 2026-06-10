@@ -7,13 +7,26 @@ import type {
   DiseasePoint,
   DiseaseTypeStat,
   DiseaseSeverityStat,
-  DiseaseReport
+  DiseaseReport,
+  DiseaseStage,
+  DiseaseStageRecord,
+  DiseaseStageStat,
+  TreatmentStatus,
+  TreatmentStatusStat,
+  DiseaseLedgerItem,
+  DiseaseRecheckReport,
+  DiseasePhotoAttachment
 } from '../types'
 import {
   DISEASE_TYPE_LABELS,
   DISEASE_TYPE_COLORS,
   DISEASE_SEVERITY_LABELS,
-  DISEASE_SEVERITY_COLORS
+  DISEASE_SEVERITY_COLORS,
+  DISEASE_STAGE_LABELS,
+  DISEASE_STAGE_COLORS,
+  DISEASE_STAGE_ORDER,
+  TREATMENT_STATUS_LABELS,
+  TREATMENT_STATUS_COLORS
 } from '../types'
 import { useSolutionStore } from './solution'
 
@@ -71,6 +84,8 @@ export const useDiseaseStore = defineStore('disease', () => {
   const selectedDiseaseId = ref<string | null>(null)
   const filterType = ref<DiseaseType | 'all'>('all')
   const filterSeverity = ref<DiseaseSeverity | 'all'>('all')
+  const filterStage = ref<DiseaseStage | 'all'>('all')
+  const filterTreatmentStatus = ref<TreatmentStatus | 'all'>('all')
   const isDrawingDisease = ref(false)
   const drawingShapeType = ref<'rect' | 'polygon' | 'freehand'>('rect')
   const drawingPoints = ref<DiseasePoint[]>([])
@@ -88,6 +103,8 @@ export const useDiseaseStore = defineStore('disease', () => {
     return visibleDiseases.value.filter(d => {
       if (filterType.value !== 'all' && !d.types.includes(filterType.value)) return false
       if (filterSeverity.value !== 'all' && d.severity !== filterSeverity.value) return false
+      if (filterStage.value !== 'all' && d.currentStage !== filterStage.value) return false
+      if (filterTreatmentStatus.value !== 'all' && d.treatmentStatus !== filterTreatmentStatus.value) return false
       return true
     })
   })
@@ -164,6 +181,85 @@ export const useDiseaseStore = defineStore('disease', () => {
     })
   })
 
+  const diseaseStageStats = computed((): DiseaseStageStat[] => {
+    const stats = new Map<DiseaseStage, { count: number; totalArea: number }>()
+
+    DISEASE_STAGE_ORDER.forEach(stage => {
+      stats.set(stage, { count: 0, totalArea: 0 })
+    })
+
+    for (const disease of visibleDiseases.value) {
+      const stat = stats.get(disease.currentStage)
+      if (stat) {
+        stat.count++
+        stat.totalArea += disease.area
+      }
+    }
+
+    const totalCount = visibleDiseases.value.length
+
+    return DISEASE_STAGE_ORDER.map(stage => {
+      const stat = stats.get(stage)!
+      return {
+        stage,
+        stageName: DISEASE_STAGE_LABELS[stage],
+        count: stat.count,
+        totalArea: Math.round(stat.totalArea),
+        percentage: totalCount > 0 ? Math.round((stat.count / totalCount) * 10000) / 100 : 0,
+        color: DISEASE_STAGE_COLORS[stage]
+      }
+    })
+  })
+
+  const treatmentStatusStats = computed((): TreatmentStatusStat[] => {
+    const stats = new Map<TreatmentStatus, number>()
+    const statuses: TreatmentStatus[] = ['pending', 'processing', 'completed', 'closed']
+
+    statuses.forEach(status => {
+      stats.set(status, 0)
+    })
+
+    for (const disease of visibleDiseases.value) {
+      const count = stats.get(disease.treatmentStatus)
+      if (count !== undefined) {
+        stats.set(disease.treatmentStatus, count + 1)
+      }
+    }
+
+    const totalCount = visibleDiseases.value.length
+
+    return statuses.map(status => {
+      const count = stats.get(status)!
+      return {
+        status,
+        statusName: TREATMENT_STATUS_LABELS[status],
+        count,
+        percentage: totalCount > 0 ? Math.round((count / totalCount) * 10000) / 100 : 0,
+        color: TREATMENT_STATUS_COLORS[status]
+      }
+    })
+  })
+
+  const initialTotalArea = computed(() => {
+    let total = 0
+    for (const disease of visibleDiseases.value) {
+      const initialRecord = disease.stageRecords.find(r => r.stage === 'initial')
+      if (initialRecord?.area) {
+        total += initialRecord.area
+      } else {
+        total += disease.area
+      }
+    }
+    return Math.round(total)
+  })
+
+  const areaChangeRate = computed(() => {
+    const initial = initialTotalArea.value
+    const current = totalDiseaseArea.value
+    if (initial === 0) return 0
+    return Math.round(((current - initial) / initial) * 10000) / 100
+  })
+
   function addDisease(data: {
     name?: string
     types?: DiseaseType[]
@@ -194,8 +290,25 @@ export const useDiseaseStore = defineStore('disease', () => {
       boundingBox,
       area: Math.round(area),
       color: DISEASE_TYPE_COLORS[data.primaryType],
-      visible: true
+      visible: true,
+      currentStage: 'initial',
+      stageRecords: [],
+      treatmentStatus: 'pending'
     }
+
+    const initialRecord: DiseaseStageRecord = {
+      id: generateId(),
+      stage: 'initial',
+      inspectorName: '',
+      inspectTime: Date.now(),
+      photos: [],
+      conclusion: data.description || '',
+      treatmentOpinion: data.treatmentSuggestion || '',
+      area: Math.round(area),
+      severity: data.severity
+    }
+
+    disease.stageRecords.push(initialRecord)
 
     solutionStore.currentSolution.diseases.push(disease)
     selectedDiseaseId.value = disease.id
@@ -332,6 +445,267 @@ export const useDiseaseStore = defineStore('disease', () => {
     drawingPoints.value = []
   }
 
+  function addStageRecord(diseaseId: string, data: {
+    stage: DiseaseStage
+    inspectorName: string
+    inspectTime?: number
+    photos?: DiseasePhotoAttachment[]
+    conclusion: string
+    treatmentOpinion: string
+    area?: number
+    severity?: DiseaseSeverity
+    notes?: string
+  }): DiseaseStageRecord | null {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return null
+
+    const record: DiseaseStageRecord = {
+      id: generateId(),
+      stage: data.stage,
+      inspectorName: data.inspectorName,
+      inspectTime: data.inspectTime || Date.now(),
+      photos: data.photos || [],
+      conclusion: data.conclusion,
+      treatmentOpinion: data.treatmentOpinion,
+      area: data.area,
+      severity: data.severity,
+      notes: data.notes
+    }
+
+    disease.stageRecords.push(record)
+    disease.currentStage = data.stage
+
+    if (data.stage === 'treatment') {
+      disease.treatmentStatus = 'processing'
+    } else if (data.stage === 'reinspection') {
+      disease.treatmentStatus = 'completed'
+    }
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return record
+  }
+
+  function updateStageRecord(diseaseId: string, recordId: string, updates: Partial<Omit<DiseaseStageRecord, 'id' | 'stage'>>): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    const record = disease.stageRecords.find(r => r.id === recordId)
+    if (!record) return false
+
+    Object.assign(record, updates)
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return true
+  }
+
+  function deleteStageRecord(diseaseId: string, recordId: string): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    const index = disease.stageRecords.findIndex(r => r.id === recordId)
+    if (index === -1) return false
+
+    const record = disease.stageRecords[index]
+    disease.stageRecords.splice(index, 1)
+
+    if (disease.stageRecords.length > 0) {
+      const latestRecord = disease.stageRecords.reduce((latest, r) =>
+        r.inspectTime > latest.inspectTime ? r : latest
+      )
+      disease.currentStage = latestRecord.stage
+    } else {
+      disease.currentStage = 'initial'
+    }
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return true
+  }
+
+  function setDiseaseStage(diseaseId: string, stage: DiseaseStage): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    disease.currentStage = stage
+
+    if (stage === 'initial') {
+      disease.treatmentStatus = 'pending'
+    } else if (stage === 'recheck') {
+      disease.treatmentStatus = 'pending'
+    } else if (stage === 'treatment') {
+      disease.treatmentStatus = 'processing'
+    } else if (stage === 'reinspection') {
+      disease.treatmentStatus = 'completed'
+    }
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return true
+  }
+
+  function setTreatmentStatus(diseaseId: string, status: TreatmentStatus): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    disease.treatmentStatus = status
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return true
+  }
+
+  function getStageRecords(diseaseId: string, stage?: DiseaseStage): DiseaseStageRecord[] {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return []
+
+    let records = [...disease.stageRecords]
+
+    if (stage) {
+      records = records.filter(r => r.stage === stage)
+    }
+
+    return records.sort((a, b) => b.inspectTime - a.inspectTime)
+  }
+
+  function getLatestStageRecord(diseaseId: string, stage?: DiseaseStage): DiseaseStageRecord | null {
+    const records = getStageRecords(diseaseId, stage)
+    return records.length > 0 ? records[0] : null
+  }
+
+  function getAreaComparison(diseaseId: string): { initialArea: number; currentArea: number; change: number; changeRate: number } | null {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return null
+
+    const initialRecord = disease.stageRecords.find(r => r.stage === 'initial')
+    const initialArea = initialRecord?.area || disease.area
+    const currentArea = disease.area
+
+    const change = currentArea - initialArea
+    const changeRate = initialArea > 0 ? (change / initialArea) * 100 : 0
+
+    return {
+      initialArea,
+      currentArea,
+      change,
+      changeRate: Math.round(changeRate * 100) / 100
+    }
+  }
+
+  function setFilterStage(stage: DiseaseStage | 'all') {
+    filterStage.value = stage
+  }
+
+  function setFilterTreatmentStatus(status: TreatmentStatus | 'all') {
+    filterTreatmentStatus.value = status
+  }
+
+  function generateRecheckReport(): DiseaseRecheckReport | null {
+    if (!solutionStore.currentSolution) return null
+
+    const ledger: DiseaseLedgerItem[] = visibleDiseases.value.map(d => {
+      const initialRecord = d.stageRecords.find(r => r.stage === 'initial')
+      const latestRecord = d.stageRecords.length > 0
+        ? d.stageRecords.reduce((latest, r) => r.inspectTime > latest.inspectTime ? r : latest)
+        : null
+
+      return {
+        id: d.id,
+        name: d.name,
+        types: d.types,
+        primaryType: d.primaryType,
+        severity: d.severity,
+        area: d.area,
+        currentStage: d.currentStage,
+        treatmentStatus: d.treatmentStatus,
+        discoveredAt: d.discoveredAt,
+        initialInspector: initialRecord?.inspectorName || '',
+        lastInspectTime: latestRecord?.inspectTime || d.discoveredAt,
+        stageCount: d.stageRecords.length
+      }
+    })
+
+    return {
+      solutionName: solutionStore.currentSolution.name,
+      generatedAt: Date.now(),
+      totalDiseases: visibleDiseases.value.length,
+      stageStats: diseaseStageStats.value,
+      treatmentStatusStats: treatmentStatusStats.value,
+      areaComparison: {
+        initialTotalArea: initialTotalArea.value,
+        currentTotalArea: Math.round(totalDiseaseArea.value),
+        areaChange: Math.round(totalDiseaseArea.value) - initialTotalArea.value,
+        areaChangeRate: areaChangeRate.value
+      },
+      ledger
+    }
+  }
+
+  function exportRecheckReport(): string | null {
+    const report = generateRecheckReport()
+    if (!report) return null
+    return JSON.stringify(report, null, 2)
+  }
+
+  function exportDiseaseLedgerAsText(): string | null {
+    if (!solutionStore.currentSolution) return null
+
+    const report = generateRecheckReport()
+    if (!report) return null
+
+    let text = `病害处置台账\n`
+    text += `==============\n\n`
+    text += `方案名称: ${report.solutionName}\n`
+    text += `生成时间: ${new Date(report.generatedAt).toLocaleString('zh-CN')}\n`
+    text += `病害总数: ${report.totalDiseases} 处\n\n`
+
+    text += `一、各阶段统计\n`
+    text += `--------------\n`
+    for (const stat of report.stageStats) {
+      text += `${stat.stageName}: ${stat.count} 处 (${stat.percentage}%)\n`
+    }
+
+    text += `\n二、处置状态统计\n`
+    text += `----------------\n`
+    for (const stat of report.treatmentStatusStats) {
+      text += `${stat.statusName}: ${stat.count} 处 (${stat.percentage}%)\n`
+    }
+
+    text += `\n三、面积变化对比\n`
+    text += `----------------\n`
+    text += `初检总面积: ${report.areaComparison.initialTotalArea} 像素\n`
+    text += `当前总面积: ${report.areaComparison.currentTotalArea} 像素\n`
+    text += `面积变化: ${report.areaComparison.areaChange >= 0 ? '+' : ''}${report.areaComparison.areaChange} 像素 (${report.areaComparison.areaChangeRate >= 0 ? '+' : ''}${report.areaComparison.areaChangeRate}%)\n`
+
+    text += `\n四、病害处置台账明细\n`
+    text += `--------------------\n`
+    report.ledger.forEach((item, index) => {
+      text += `\n${index + 1}. ${item.name}\n`
+      text += `   类型: ${item.types.map(t => DISEASE_TYPE_LABELS[t]).join('、')}\n`
+      text += `   严重程度: ${DISEASE_SEVERITY_LABELS[item.severity]}\n`
+      text += `   当前阶段: ${DISEASE_STAGE_LABELS[item.currentStage]}\n`
+      text += `   处置状态: ${TREATMENT_STATUS_LABELS[item.treatmentStatus]}\n`
+      text += `   面积: ${item.area} 像素\n`
+      text += `   发现时间: ${new Date(item.discoveredAt).toLocaleString('zh-CN')}\n`
+      text += `   初检人: ${item.initialInspector || '未填写'}\n`
+      text += `   最近检查时间: ${new Date(item.lastInspectTime).toLocaleString('zh-CN')}\n`
+      text += `   检查记录数: ${item.stageCount} 次\n`
+    })
+
+    return text
+  }
+
   function generateDiseaseReport(): DiseaseReport | null {
     if (!solutionStore.currentSolution) return null
 
@@ -402,6 +776,8 @@ export const useDiseaseStore = defineStore('disease', () => {
     selectedDiseaseId,
     filterType,
     filterSeverity,
+    filterStage,
+    filterTreatmentStatus,
     isDrawingDisease,
     drawingShapeType,
     drawingPoints,
@@ -413,6 +789,10 @@ export const useDiseaseStore = defineStore('disease', () => {
     totalDiseaseArea,
     diseaseTypeStats,
     diseaseSeverityStats,
+    diseaseStageStats,
+    treatmentStatusStats,
+    initialTotalArea,
+    areaChangeRate,
     addDisease,
     updateDisease,
     deleteDisease,
@@ -421,14 +801,27 @@ export const useDiseaseStore = defineStore('disease', () => {
     selectDisease,
     setFilterType,
     setFilterSeverity,
+    setFilterStage,
+    setFilterTreatmentStatus,
     setDiseaseVisible,
     startDrawing,
     addDrawingPoint,
     finishDrawing,
     cancelDrawing,
+    addStageRecord,
+    updateStageRecord,
+    deleteStageRecord,
+    setDiseaseStage,
+    setTreatmentStatus,
+    getStageRecords,
+    getLatestStageRecord,
+    getAreaComparison,
     generateDiseaseReport,
     exportDiseaseReport,
     exportDiseaseListAsText,
+    generateRecheckReport,
+    exportRecheckReport,
+    exportDiseaseLedgerAsText,
     clearAllDiseases
   }
 })

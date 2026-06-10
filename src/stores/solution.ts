@@ -450,6 +450,24 @@ export const useSolutionStore = defineStore('solution', () => {
             severity = 4
           }
 
+          let stageRecords = d.stageRecords || []
+          if (!Array.isArray(stageRecords) || stageRecords.length === 0) {
+            stageRecords = [{
+              id: generateId(),
+              stage: 'initial',
+              inspectorName: '',
+              inspectTime: d.discoveredAt || Date.now(),
+              photos: [],
+              conclusion: d.description || '',
+              treatmentOpinion: d.treatmentSuggestion || '',
+              area: d.area || 0,
+              severity: severity
+            }]
+          }
+
+          const currentStage = d.currentStage || 'initial'
+          const treatmentStatus = d.treatmentStatus || 'pending'
+
           return {
             id: generateId(),
             name: d.name || '未命名病害',
@@ -464,7 +482,10 @@ export const useSolutionStore = defineStore('solution', () => {
             boundingBox: d.boundingBox || { left: 0, top: 0, width: 0, height: 0 },
             area: d.area || 0,
             color: d.color || '#888888',
-            visible: d.visible !== false
+            visible: d.visible !== false,
+            currentStage,
+            stageRecords,
+            treatmentStatus
           }
         })
       }
