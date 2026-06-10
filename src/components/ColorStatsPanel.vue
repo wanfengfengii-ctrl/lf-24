@@ -70,10 +70,24 @@ import { RefreshOutline } from '@vicons/ionicons5'
 import { useSolutionStore } from '../stores/solution'
 import { storeToRefs } from 'pinia'
 
+const props = defineProps<{
+  enablePeriodFilter?: boolean
+}>()
+
 const solutionStore = useSolutionStore()
-const { visibleLayers } = storeToRefs(solutionStore)
+const { visibleLayers, visibleFilteredLayers, selectedPeriodIds } = storeToRefs(solutionStore)
+
+const effectiveLayers = computed(() => {
+  if (props.enablePeriodFilter && selectedPeriodIds.value.length > 0) {
+    return visibleFilteredLayers.value
+  }
+  return visibleLayers.value
+})
 
 const stats = computed(() => {
+  if (props.enablePeriodFilter && selectedPeriodIds.value.length > 0) {
+    return solutionStore.calculateColorStatsForLayers(effectiveLayers.value)
+  }
   return solutionStore.calculateColorAreaStats()
 })
 
@@ -81,7 +95,7 @@ const totalArea = computed(() => {
   return stats.value.reduce((sum, s) => sum + s.area, 0)
 })
 
-const visibleLayerCount = computed(() => visibleLayers.value.length)
+const visibleLayerCount = computed(() => effectiveLayers.value.length)
 
 function formatArea(area: number): string {
   if (area >= 1000000) {

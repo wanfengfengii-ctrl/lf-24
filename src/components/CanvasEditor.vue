@@ -28,6 +28,7 @@ import { storeToRefs } from 'pinia'
 const props = defineProps<{
   canvasId: string
   readOnly?: boolean
+  enablePeriodFilter?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,7 +36,7 @@ const emit = defineEmits<{
 }>()
 
 const solutionStore = useSolutionStore()
-const { currentSolution, activeLayer, sortedLayers } = storeToRefs(solutionStore)
+const { currentSolution, activeLayer, sortedLayers, visibleFilteredLayers, selectedPeriodIds } = storeToRefs(solutionStore)
 const dialog = useDialog()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -116,6 +117,13 @@ function loadLineArt() {
   })
 }
 
+function getRenderLayers() {
+  if (props.enablePeriodFilter && selectedPeriodIds.value.length > 0) {
+    return visibleFilteredLayers.value
+  }
+  return sortedLayers.value
+}
+
 function renderAllLayers() {
   if (!fabricCanvas.value || isUpdating.value) return
 
@@ -129,18 +137,19 @@ function renderAllLayers() {
   })
   objectsToRemove.forEach((obj: any) => fabricCanvas.value.remove(obj))
 
-  const layers = [...sortedLayers.value].sort((a, b) => a.zIndex - b.zIndex)
+  const layers = [...getRenderLayers()].sort((a, b) => a.zIndex - b.zIndex)
 
   for (const layer of layers) {
     for (const objData of layer.objects) {
       try {
         const fabricObj = createFabricObjectFromData(objData)
         if (fabricObj) {
+          const isActive = layer.id === activeLayer.value?.id
           fabricObj.set({
             opacity: (layer.opacity / 100) * (objData.opacity || 1),
             visible: layer.visible,
-            selectable: !props.readOnly && layer.id === activeLayer.value?.id,
-            evented: !props.readOnly && layer.id === activeLayer.value?.id,
+            selectable: !props.readOnly && isActive,
+            evented: !props.readOnly && isActive,
             data: { layerId: layer.id }
           })
           fabricCanvas.value.add(fabricObj)
@@ -491,6 +500,12 @@ watch(activeLayer, () => {
     fabricCanvas.value.renderAll()
   }
 })
+
+watch(selectedPeriodIds, () => {
+  if (props.enablePeriodFilter) {
+    renderAllLayers()
+  }
+}, { deep: true })
 
 onMounted(() => {
   nextTick(() => {

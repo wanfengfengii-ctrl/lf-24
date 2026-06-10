@@ -9,18 +9,36 @@
               <span class="subtitle">Ancient Architectural Painting Restoration</span>
             </div>
             <div class="header-info">
-              <span class="current-solution-name" v-if="currentSolution">
-                当前: {{ currentSolution.name }}
-              </span>
+              <n-space>
+                <n-tag
+                  :type="historyMode ? 'primary' : 'default'"
+                  @click="historyMode = !historyMode"
+                  style="cursor: pointer"
+                >
+                  <template #icon>
+                    <n-icon><time-outline /></n-icon>
+                  </template>
+                  {{ historyMode ? '历史推演模式' : '普通模式' }}
+                </n-tag>
+                <span class="current-solution-name" v-if="currentSolution">
+                  当前: {{ currentSolution.name }}
+                </span>
+              </n-space>
             </div>
           </header>
 
           <main class="app-main">
-            <aside class="sidebar left-sidebar">
-              <SolutionPanel @open-compare="showCompare = true" />
+            <aside class="sidebar left-sidebar" :class="{ 'history-mode': historyMode }">
+              <template v-if="!historyMode">
+                <SolutionPanel @open-compare="showCompare = true" />
+              </template>
+              <template v-else>
+                <HistoryDeductionPanel />
+              </template>
             </aside>
 
             <section class="canvas-section">
+              <TimelinePanel v-if="historyMode" />
               <Toolbar
                 :current-tool="currentTool"
                 :current-color="currentColor"
@@ -36,6 +54,7 @@
                 <CanvasEditor
                   ref="canvasEditorRef"
                   canvas-id="main-canvas"
+                  :enable-period-filter="historyMode"
                   @objects-updated="handleObjectsUpdated"
                 />
               </div>
@@ -44,7 +63,7 @@
             <aside class="sidebar right-sidebar">
               <LayerPanel />
               <div class="stats-container">
-                <ColorStatsPanel />
+                <ColorStatsPanel :enable-period-filter="historyMode" />
               </div>
             </aside>
           </main>
@@ -61,8 +80,12 @@ import { ref, onMounted } from 'vue'
 import {
   NConfigProvider,
   NMessageProvider,
-  NDialogProvider
+  NDialogProvider,
+  NSpace,
+  NTag,
+  NIcon
 } from 'naive-ui'
+import { TimeOutline } from '@vicons/ionicons5'
 import { useSolutionStore } from './stores/solution'
 import { storeToRefs } from 'pinia'
 import CanvasEditor from './components/CanvasEditor.vue'
@@ -71,12 +94,15 @@ import Toolbar from './components/Toolbar.vue'
 import SolutionPanel from './components/SolutionPanel.vue'
 import ColorStatsPanel from './components/ColorStatsPanel.vue'
 import CompareView from './components/CompareView.vue'
+import TimelinePanel from './components/TimelinePanel.vue'
+import HistoryDeductionPanel from './components/HistoryDeductionPanel.vue'
 
 const solutionStore = useSolutionStore()
 const { currentSolution } = storeToRefs(solutionStore)
 
 const canvasEditorRef = ref<InstanceType<typeof CanvasEditor> | null>(null)
 const showCompare = ref(false)
+const historyMode = ref(false)
 const currentTool = ref<string>('select')
 const currentColor = ref('#3b82f6')
 const brushWidth = ref(10)
@@ -194,6 +220,10 @@ body {
   flex-direction: column;
   flex-shrink: 0;
   background: #fff;
+}
+
+.sidebar.history-mode {
+  width: 340px;
 }
 
 .left-sidebar {

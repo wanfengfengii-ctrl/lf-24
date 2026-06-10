@@ -106,6 +106,59 @@
             />
             <span class="setting-value">{{ layer.opacity }}%</span>
           </div>
+
+          <div class="settings-section">
+            <div class="section-title">
+              <n-icon><time-outline /></n-icon>
+              <span>历史属性</span>
+            </div>
+
+            <div class="setting-item">
+              <span class="setting-label">所属时期</span>
+              <n-select
+                :value="layer.historicalInfo.periodId"
+                :options="periodOptions"
+                placeholder="选择历史时期"
+                size="small"
+                @update:value="(value: string | null) => handlePeriodChange(layer.id, value)"
+              />
+            </div>
+
+            <div class="setting-item">
+              <span class="setting-label">置信度</span>
+              <n-slider
+                :value="layer.historicalInfo.confidence"
+                :min="0"
+                :max="100"
+                @update:value="(value: number) => handleConfidenceChange(layer.id, value)"
+              />
+              <span class="setting-value">{{ layer.historicalInfo.confidence }}%</span>
+            </div>
+
+            <div class="setting-item column">
+              <span class="setting-label">材料说明</span>
+              <n-input
+                :value="layer.historicalInfo.materialDescription"
+                type="textarea"
+                :rows="2"
+                placeholder="描述使用的颜料、材料等"
+                size="small"
+                @update:value="(value: string) => handleMaterialChange(layer.id, value)"
+              />
+            </div>
+
+            <div class="setting-item column">
+              <span class="setting-label">推演依据</span>
+              <n-input
+                :value="layer.historicalInfo.deductionBasis"
+                type="textarea"
+                :rows="2"
+                placeholder="说明色彩推演的依据"
+                size="small"
+                @update:value="(value: string) => handleDeductionBasisChange(layer.id, value)"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -118,14 +171,15 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
-import { useDialog, NButton, NIcon, NInput, NSpace, NDropdown, NScrollbar, NEmpty } from 'naive-ui'
+import { useDialog, NButton, NIcon, NInput, NSpace, NDropdown, NScrollbar, NEmpty, NSelect } from 'naive-ui'
 import {
   AddOutline,
   ChevronDownOutline,
   ChevronUpOutline,
   EyeOutline,
   EyeOffOutline,
-  TrashOutline
+  TrashOutline,
+  TimeOutline
 } from '@vicons/ionicons5'
 import { useSolutionStore } from '../stores/solution'
 import { storeToRefs } from 'pinia'
@@ -133,7 +187,7 @@ import type { LayerType, Layer } from '../types'
 import { LAYER_TYPE_LABELS, LAYER_TYPE_COLORS } from '../types'
 
 const solutionStore = useSolutionStore()
-const { sortedLayers, activeLayerId } = storeToRefs(solutionStore)
+const { sortedLayers, activeLayerId, sortedHistoricalPeriods } = storeToRefs(solutionStore)
 const dialog = useDialog()
 
 const showAddMenu = ref(false)
@@ -248,6 +302,29 @@ function confirmDelete(layer: Layer) {
     })
   }
 }
+
+const periodOptions = computed(() => {
+  return sortedHistoricalPeriods.value.map(p => ({
+    label: p.name,
+    value: p.id
+  }))
+})
+
+function handlePeriodChange(layerId: string, periodId: string | null) {
+  solutionStore.setLayerHistoricalInfo(layerId, { periodId })
+}
+
+function handleConfidenceChange(layerId: string, confidence: number) {
+  solutionStore.setLayerHistoricalInfo(layerId, { confidence })
+}
+
+function handleMaterialChange(layerId: string, description: string) {
+  solutionStore.setLayerHistoricalInfo(layerId, { materialDescription: description })
+}
+
+function handleDeductionBasisChange(layerId: string, basis: string) {
+  solutionStore.setLayerHistoricalInfo(layerId, { deductionBasis: basis })
+}
 </script>
 
 <style scoped>
@@ -359,6 +436,36 @@ function confirmDelete(layer: Layer) {
   color: #666;
   min-width: 40px;
   text-align: right;
+}
+
+.setting-item.column {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.setting-item.column .setting-label {
+  white-space: normal;
+}
+
+.settings-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #e0e0e0;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #3b82f6;
+  margin-bottom: 8px;
+}
+
+.section-title n-icon {
+  font-size: 14px;
 }
 
 .empty-layers {

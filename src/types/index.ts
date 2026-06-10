@@ -1,3 +1,19 @@
+export interface HistoricalPeriod {
+  id: string
+  name: string
+  startYear: number
+  endYear: number
+  description: string
+  color: string
+}
+
+export interface LayerHistoricalInfo {
+  periodId: string | null
+  materialDescription: string
+  deductionBasis: string
+  confidence: number
+}
+
 export interface Layer {
   id: string
   name: string
@@ -6,6 +22,7 @@ export interface Layer {
   opacity: number
   objects: FabricObjectData[]
   zIndex: number
+  historicalInfo: LayerHistoricalInfo
 }
 
 export interface FabricObjectData {
@@ -22,6 +39,8 @@ export interface Solution {
   layers: Layer[]
   canvasWidth: number
   canvasHeight: number
+  historicalPeriods: HistoricalPeriod[]
+  selectedPeriodIds: string[]
 }
 
 export interface ColorAreaStat {
@@ -45,3 +64,58 @@ export const LAYER_TYPE_COLORS: Record<LayerType, string> = {
   outline: '#2c3e50',
   repair: '#a8d8ea'
 }
+
+export interface PeriodColorStat {
+  periodId: string
+  periodName: string
+  stats: ColorAreaStat[]
+  totalArea: number
+}
+
+export interface RestorationReport {
+  solutionName: string
+  generatedAt: number
+  periods: Array<{
+    period: HistoricalPeriod
+    layers: Array<{
+      layer: Layer
+      colorStats: ColorAreaStat[]
+      totalArea: number
+    }>
+    totalColorStats: ColorAreaStat[]
+    totalArea: number
+  }>
+  overallStats: ColorAreaStat[]
+  overallTotalArea: number
+}
+
+export const DEFAULT_HISTORICAL_PERIODS: Omit<HistoricalPeriod, 'id'>[] = [
+  {
+    name: '唐代',
+    startYear: 618,
+    endYear: 907,
+    description: '唐代建筑彩画以朱砂红、石绿、石青为主，色彩鲜艳浓烈',
+    color: '#c41e3a'
+  },
+  {
+    name: '宋代',
+    startYear: 960,
+    endYear: 1279,
+    description: '宋代彩画渐趋淡雅，青绿叠晕成为主流，讲究层次与韵律',
+    color: '#2e8b57'
+  },
+  {
+    name: '明代',
+    startYear: 1368,
+    endYear: 1644,
+    description: '明代彩画规制严谨，龙凤图案盛行，红金搭配富丽堂皇',
+    color: '#daa520'
+  },
+  {
+    name: '清代',
+    startYear: 1644,
+    endYear: 1912,
+    description: '清代彩画工艺成熟，和玺、旋子、苏式三大类定型',
+    color: '#4169e1'
+  }
+]
