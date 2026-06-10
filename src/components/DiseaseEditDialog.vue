@@ -15,27 +15,57 @@
           <n-input v-model:value="formData.name" placeholder="请输入病害名称" />
         </n-form-item>
 
-        <n-form-item label="类型">
+        <n-form-item label="病害类型" :show-label="true">
+          <div class="type-selector">
+            <n-checkbox-group v-model:value="formData.types">
+              <n-space wrap>
+                <n-checkbox
+                  v-for="typeOption in diseaseTypeOptions"
+                  :key="typeOption.value"
+                  :value="typeOption.value"
+                >
+                  <span
+                    class="type-color-dot"
+                    :style="{ backgroundColor: typeOption.color }"
+                  ></span>
+                  {{ typeOption.label }}
+                </n-checkbox>
+              </n-space>
+            </n-checkbox-group>
+          </div>
+        </n-form-item>
+
+        <n-form-item label="主类型">
           <n-select
-            v-model:value="formData.type"
-            :options="diseaseTypeOptions"
+            v-model:value="formData.primaryType"
+            :options="primaryTypeOptions"
+            :disabled="formData.types.length === 0"
+            placeholder="请选择主病害类型"
           />
         </n-form-item>
 
-        <n-form-item label="严重程度">
-          <n-radio-group v-model:value="formData.severity">
-            <n-space>
-              <n-radio value="mild">
-                <span style="color: #22c55e">●</span> 轻微
-              </n-radio>
-              <n-radio value="moderate">
-                <span style="color: #f59e0b">●</span> 中等
-              </n-radio>
-              <n-radio value="severe">
-                <span style="color: #ef4444">●</span> 严重
-              </n-radio>
+        <n-form-item label="严重等级">
+          <div class="severity-selector">
+            <n-space :size="8">
+              <div
+                v-for="level in 5"
+                :key="level"
+                class="severity-btn"
+                :class="{ active: formData.severity === level }"
+                :style="{
+                  backgroundColor: formData.severity === level ? getSeverityColor(level) : 'transparent',
+                  borderColor: getSeverityColor(level),
+                  color: formData.severity === level ? '#fff' : getSeverityColor(level)
+                }"
+                @click="formData.severity = level as DiseaseSeverity"
+              >
+                {{ level }}级
+              </div>
             </n-space>
-          </n-radio-group>
+            <span class="severity-label">
+              {{ DISEASE_SEVERITY_LABELS[formData.severity] }}
+            </span>
+          </div>
         </n-form-item>
 
         <n-form-item label="发现时间">
@@ -84,15 +114,20 @@ import {
   NFormItem,
   NInput,
   NSelect,
-  NRadioGroup,
-  NRadio,
   NSpace,
   NDatePicker,
   NInputNumber,
-  NModal
+  NModal,
+  NCheckboxGroup,
+  NCheckbox
 } from 'naive-ui'
 import type { DiseaseType, DiseaseSeverity, DiseaseAnnotation } from '../types'
-import { DISEASE_TYPE_LABELS, DISEASE_TYPE_COLORS } from '../types'
+import {
+  DISEASE_TYPE_LABELS,
+  DISEASE_TYPE_COLORS,
+  DISEASE_SEVERITY_LABELS,
+  DISEASE_SEVERITY_COLORS
+} from '../types'
 
 const props = defineProps<{
   show: boolean
@@ -112,17 +147,27 @@ const showModal = computed({
 const isEdit = computed(() => !!props.disease)
 
 const diseaseTypeOptions = [
-  { label: '褪色', value: 'fading', color: DISEASE_TYPE_COLORS.fading },
-  { label: '剥落', value: 'peeling', color: DISEASE_TYPE_COLORS.peeling },
-  { label: '裂缝', value: 'crack', color: DISEASE_TYPE_COLORS.crack },
-  { label: '污损', value: 'stain', color: DISEASE_TYPE_COLORS.stain },
-  { label: '其他', value: 'other', color: DISEASE_TYPE_COLORS.other }
+  { label: '褪色', value: 'fading' as DiseaseType, color: DISEASE_TYPE_COLORS.fading },
+  { label: '剥落', value: 'peeling' as DiseaseType, color: DISEASE_TYPE_COLORS.peeling },
+  { label: '裂缝', value: 'crack' as DiseaseType, color: DISEASE_TYPE_COLORS.crack },
+  { label: '污损', value: 'stain' as DiseaseType, color: DISEASE_TYPE_COLORS.stain },
+  { label: '其他', value: 'other' as DiseaseType, color: DISEASE_TYPE_COLORS.other }
 ]
+
+const primaryTypeOptions = computed(() => {
+  return diseaseTypeOptions
+    .filter(opt => formData.value.types.includes(opt.value))
+    .map(opt => ({
+      label: `${opt.label} (主类型)`,
+      value: opt.value
+    }))
+})
 
 const defaultFormData = {
   name: '',
-  type: 'fading' as DiseaseType,
-  severity: 'mild' as DiseaseSeverity,
+  types: ['fading'] as DiseaseType[],
+  primaryType: 'fading' as DiseaseType,
+  severity: 3 as DiseaseSeverity,
   description: '',
   discoveredAt: Date.now(),
   treatmentSuggestion: '',
@@ -131,12 +176,17 @@ const defaultFormData = {
 
 const formData = ref({ ...defaultFormData })
 
+function getSeverityColor(level: number): string {
+  return DISEASE_SEVERITY_COLORS[level as DiseaseSeverity]
+}
+
 watch(() => props.show, (newVal) => {
   if (newVal) {
     if (props.disease) {
       formData.value = {
         name: props.disease.name,
-        type: props.disease.type,
+        types: [...props.disease.types],
+        primaryType: props.disease.primaryType,
         severity: props.disease.severity,
         description: props.disease.description,
         discoveredAt: props.disease.discoveredAt,
@@ -149,14 +199,25 @@ watch(() => props.show, (newVal) => {
   }
 })
 
+watch(() => formData.value.types, (newTypes) => {
+  if (newTypes.length > 0 && !newTypes.includes(formData.value.primaryType)) {
+    formData.value.primaryType = newTypes[0]
+  }
+}, { deep: true })
+
 function handleSave() {
   if (!formData.value.name.trim()) {
-    formData.value.name = `${DISEASE_TYPE_LABELS[formData.value.type]}病害`
+    formData.value.name = `${DISEASE_TYPE_LABELS[formData.value.primaryType]}病害`
+  }
+
+  if (formData.value.types.length === 0) {
+    formData.value.types = [formData.value.primaryType]
   }
 
   emit('save', {
     name: formData.value.name.trim(),
-    type: formData.value.type,
+    types: [...formData.value.types],
+    primaryType: formData.value.primaryType,
     severity: formData.value.severity,
     description: formData.value.description.trim(),
     discoveredAt: formData.value.discoveredAt,
@@ -174,6 +235,55 @@ function handleCancel() {
 <style scoped>
 .disease-edit-form {
   padding: 8px 0;
+}
+
+.type-selector {
+  width: 100%;
+}
+
+.type-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.severity-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.severity-btn {
+  width: 40px;
+  height: 40px;
+  border: 2px solid;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.severity-btn:hover {
+  transform: scale(1.05);
+}
+
+.severity-btn.active {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.severity-label {
+  font-size: 13px;
+  color: #666;
+  margin-left: 8px;
 }
 
 .unit {

@@ -434,20 +434,39 @@ export const useSolutionStore = defineStore('solution', () => {
 
       let diseases: DiseaseAnnotation[] = []
       if (data.diseases && Array.isArray(data.diseases)) {
-        diseases = data.diseases.map((d: any) => ({
-          id: generateId(),
-          name: d.name || '未命名病害',
-          type: d.type || 'other',
-          severity: d.severity || 'mild',
-          description: d.description || '',
-          discoveredAt: d.discoveredAt || Date.now(),
-          treatmentSuggestion: d.treatmentSuggestion || '',
-          shapeType: d.shapeType || 'rect',
-          points: d.points || [],
-          boundingBox: d.boundingBox || { left: 0, top: 0, width: 0, height: 0 },
-          area: d.area || 0,
-          color: d.color || '#888888'
-        }))
+        diseases = data.diseases.map((d: any) => {
+          const primaryType = d.primaryType || d.type || 'other'
+          const types = d.types && Array.isArray(d.types) && d.types.length > 0
+            ? d.types
+            : [primaryType]
+          let severity: 1 | 2 | 3 | 4 | 5 = 3
+          if (typeof d.severity === 'number' && d.severity >= 1 && d.severity <= 5) {
+            severity = d.severity
+          } else if (d.severity === 'mild') {
+            severity = 2
+          } else if (d.severity === 'moderate') {
+            severity = 3
+          } else if (d.severity === 'severe') {
+            severity = 4
+          }
+
+          return {
+            id: generateId(),
+            name: d.name || '未命名病害',
+            types,
+            primaryType,
+            severity,
+            description: d.description || '',
+            discoveredAt: d.discoveredAt || Date.now(),
+            treatmentSuggestion: d.treatmentSuggestion || '',
+            shapeType: d.shapeType || 'rect',
+            points: d.points || [],
+            boundingBox: d.boundingBox || { left: 0, top: 0, width: 0, height: 0 },
+            area: d.area || 0,
+            color: d.color || '#888888',
+            visible: d.visible !== false
+          }
+        })
       }
 
       const solution: Solution = {

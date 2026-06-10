@@ -2,11 +2,16 @@
   <div class="disease-panel">
     <div class="panel-header">
       <span class="panel-title">病害标注</span>
-      <n-switch
-        v-model:value="diseaseVisible"
-        size="small"
-        @update:value="handleToggleVisible"
-      />
+      <n-space :size="8">
+        <n-tag size="small" type="info">
+          显示 {{ visibleDiseases.length }} / {{ diseases.length }}
+        </n-tag>
+        <n-switch
+          v-model:value="diseaseVisible"
+          size="small"
+          @update:value="handleToggleAllVisible"
+        />
+      </n-space>
     </div>
 
     <div class="panel-toolbar">
@@ -121,7 +126,7 @@
             v-for="disease in filteredDiseases"
             :key="disease.id"
             class="disease-item"
-            :class="{ active: selectedDiseaseId === disease.id }"
+            :class="{ active: selectedDiseaseId === disease.id, hidden: !disease.visible }"
             @click="handleSelectDisease(disease.id)"
           >
             <div class="item-header">
@@ -132,16 +137,45 @@
                 ></span>
                 <span class="item-name">{{ disease.name }}</span>
               </div>
+              <div class="item-header-actions">
+                <n-button
+                  size="tiny"
+                  text
+                  @click.stop="handleToggleDiseaseVisible(disease.id)"
+                >
+                  <template #icon>
+                    <n-icon>{{ disease.visible ? eyeOutline : eyeOffOutline }}</n-icon>
+                  </template>
+                </n-button>
+                <span
+                  class="severity-badge"
+                  :style="{ backgroundColor: getSeverityColor(disease.severity) }"
+                >
+                  {{ disease.severity }}级
+                </span>
+              </div>
+            </div>
+            <div class="type-tags">
               <n-tag
+                v-for="type in disease.types"
+                :key="type"
                 size="small"
-                :type="getSeverityTagType(disease.severity)"
+                :style="{
+                  backgroundColor: getTypeColor(type) + '15',
+                  borderColor: getTypeColor(type),
+                  color: getTypeColor(type)
+                }"
+                :bordered="true"
               >
-                {{ DISEASE_SEVERITY_LABELS[disease.severity] }}
+                <span v-if="type === disease.primaryType" class="primary-badge">主</span>
+                {{ DISEASE_TYPE_LABELS[type] }}
               </n-tag>
             </div>
             <div class="item-info">
-              <span class="info-item">类型: {{ DISEASE_TYPE_LABELS[disease.type] }}</span>
               <span class="info-item">面积: {{ disease.area }} px</span>
+              <span class="info-item">
+                {{ formatDate(disease.discoveredAt) }}
+              </span>
             </div>
             <div class="item-actions">
               <n-button
@@ -192,20 +226,24 @@ import {
   SquareOutline,
   ShapesOutline,
   TrashOutline,
-  DownloadOutline
+  DownloadOutline,
+  EyeOutline,
+  EyeOffOutline
 } from '@vicons/ionicons5'
 import { storeToRefs } from 'pinia'
 import { useDiseaseStore } from '../stores/disease'
 import type { DiseaseType, DiseaseSeverity, DiseaseAnnotation } from '../types'
 import {
   DISEASE_TYPE_LABELS,
-  DISEASE_SEVERITY_LABELS
+  DISEASE_TYPE_COLORS,
+  DISEASE_SEVERITY_COLORS
 } from '../types'
 import DiseaseEditDialog from './DiseaseEditDialog.vue'
 
 const diseaseStore = useDiseaseStore()
 const {
   diseases,
+  visibleDiseases,
   filteredDiseases,
   selectedDiseaseId,
   filterType,
@@ -217,6 +255,9 @@ const {
 
 const dialog = useDialog()
 const message = useMessage()
+
+const eyeOutline = EyeOutline
+const eyeOffOutline = EyeOffOutline
 
 const showEditDialog = ref(false)
 const editingDisease = ref<DiseaseAnnotation | null>(null)
@@ -238,9 +279,11 @@ const typeFilterOptions = [
 
 const severityFilterOptions = [
   { label: '全部程度', value: 'all' },
-  { label: '轻微', value: 'mild' },
-  { label: '中等', value: 'moderate' },
-  { label: '严重', value: 'severe' }
+  { label: '1级 - 极轻微', value: 1 },
+  { label: '2级 - 轻微', value: 2 },
+  { label: '3级 - 中等', value: 3 },
+  { label: '4级 - 严重', value: 4 },
+  { label: '5级 - 极严重', value: 5 }
 ]
 
 const exportOptions = [
@@ -248,16 +291,25 @@ const exportOptions = [
   { label: '导出文本清单', key: 'text' }
 ]
 
-function getSeverityTagType(severity: DiseaseSeverity): 'success' | 'warning' | 'error' {
-  switch (severity) {
-    case 'mild': return 'success'
-    case 'moderate': return 'warning'
-    case 'severe': return 'error'
-  }
+function getSeverityColor(severity: DiseaseSeverity): string {
+  return DISEASE_SEVERITY_COLORS[severity]
 }
 
-function handleToggleVisible(value: boolean) {
+function getTypeColor(type: DiseaseType): string {
+  return DISEASE_TYPE_COLORS[type]
+}
+
+function formatDate(timestamp: number): string {
+  const date = new Date(timestamp)
+  return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function handleToggleAllVisible(value: boolean) {
   diseaseStore.setDiseaseVisible(value)
+}
+
+function handleToggleDiseaseVisible(diseaseId: string) {
+  diseaseStore.toggleDiseaseVisible(diseaseId)
 }
 
 function handleStartRectDrawing() {
@@ -476,11 +528,15 @@ function downloadFile(content: string, filename: string, mimeType: string) {
   background: #e6f4ff;
 }
 
+.disease-item.hidden {
+  opacity: 0.5;
+}
+
 .item-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .item-title {
@@ -490,6 +546,8 @@ function downloadFile(content: string, filename: string, mimeType: string) {
   font-size: 13px;
   font-weight: 500;
   color: #333;
+  flex: 1;
+  min-width: 0;
 }
 
 .type-dot {
@@ -506,14 +564,52 @@ function downloadFile(content: string, filename: string, mimeType: string) {
   white-space: nowrap;
 }
 
+.item-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.severity-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.type-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.primary-badge {
+  display: inline-block;
+  background: currentColor;
+  color: #fff;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  margin-right: 2px;
+  line-height: 14px;
+}
+
 .item-info {
   font-size: 11px;
   color: #999;
   margin-bottom: 8px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .info-item {
-  margin-right: 12px;
+  flex-shrink: 0;
 }
 
 .item-actions {

@@ -78,7 +78,7 @@ const drawingPreview = ref<any>(null)
 const diseaseDrawingStartPoint = ref<{ x: number; y: number } | null>(null)
 const diseaseDrawingPreview = ref<any>(null)
 const currentDiseaseType = ref<DiseaseType>('fading')
-const currentDiseaseSeverity = ref<DiseaseSeverity>('mild')
+const currentDiseaseSeverity = ref<DiseaseSeverity>(3)
 const diseaseObjects = ref<any[]>([])
 
 function initCanvas() {
@@ -213,7 +213,8 @@ function renderAllLayers() {
 
 function getFilteredDiseases() {
   return diseases.value.filter(d => {
-    if (filterType.value !== 'all' && d.type !== filterType.value) return false
+    if (!d.visible) return false
+    if (filterType.value !== 'all' && !d.types.includes(filterType.value)) return false
     if (filterSeverity.value !== 'all' && d.severity !== filterSeverity.value) return false
     return true
   })
@@ -265,7 +266,9 @@ function renderDiseases() {
         fabricCanvas.value.add(fabricObj)
         diseaseObjects.value.push(fabricObj)
 
-        const labelText = new fabric.IText(disease.name, {
+        const typeCount = disease.types.length
+        const labelSuffix = typeCount > 1 ? ` (+${typeCount - 1})` : ''
+        const labelText = new fabric.IText(`${disease.name}${labelSuffix}`, {
           left: disease.boundingBox.left,
           top: disease.boundingBox.top - 20,
           fontSize: 12,

@@ -101,7 +101,46 @@ export interface RestorationReport {
 
 export type DiseaseType = 'fading' | 'peeling' | 'crack' | 'stain' | 'other'
 
-export type DiseaseSeverity = 'mild' | 'moderate' | 'severe'
+export type DiseaseSeverity = 1 | 2 | 3 | 4 | 5
+
+export type DiseaseStage = 'initial' | 'recheck' | 'treatment' | 'reinspection'
+
+export const DISEASE_STAGE_LABELS: Record<DiseaseStage, string> = {
+  initial: '初检',
+  recheck: '复查',
+  treatment: '处置',
+  reinspection: '复验'
+}
+
+export const DISEASE_STAGE_COLORS: Record<DiseaseStage, string> = {
+  initial: '#1677ff',
+  recheck: '#722ed1',
+  treatment: '#fa8c16',
+  reinspection: '#52c41a'
+}
+
+export const DISEASE_STAGE_ORDER: DiseaseStage[] = ['initial', 'recheck', 'treatment', 'reinspection']
+
+export interface DiseasePhotoAttachment {
+  id: string
+  name: string
+  url: string
+  size: number
+  uploadedAt: number
+}
+
+export interface DiseaseStageRecord {
+  id: string
+  stage: DiseaseStage
+  inspectorName: string
+  inspectTime: number
+  photos: DiseasePhotoAttachment[]
+  conclusion: string
+  treatmentOpinion: string
+  area?: number
+  severity?: DiseaseSeverity
+  notes?: string
+}
 
 export interface DiseasePoint {
   x: number
@@ -111,7 +150,8 @@ export interface DiseasePoint {
 export interface DiseaseAnnotation {
   id: string
   name: string
-  type: DiseaseType
+  types: DiseaseType[]
+  primaryType: DiseaseType
   severity: DiseaseSeverity
   description: string
   discoveredAt: number
@@ -126,6 +166,10 @@ export interface DiseaseAnnotation {
   }
   area: number
   color: string
+  visible: boolean
+  currentStage: DiseaseStage
+  stageRecords: DiseaseStageRecord[]
+  treatmentStatus: 'pending' | 'processing' | 'completed' | 'closed'
 }
 
 export interface DiseaseTypeStat {
@@ -143,6 +187,7 @@ export interface DiseaseSeverityStat {
   count: number
   totalArea: number
   percentage: number
+  color: string
 }
 
 export interface DiseaseReport {
@@ -172,15 +217,27 @@ export const DISEASE_TYPE_COLORS: Record<DiseaseType, string> = {
 }
 
 export const DISEASE_SEVERITY_LABELS: Record<DiseaseSeverity, string> = {
-  mild: '轻微',
-  moderate: '中等',
-  severe: '严重'
+  1: '1级 - 极轻微',
+  2: '2级 - 轻微',
+  3: '3级 - 中等',
+  4: '4级 - 严重',
+  5: '5级 - 极严重'
+}
+
+export const DISEASE_SEVERITY_SHORT_LABELS: Record<DiseaseSeverity, string> = {
+  1: '极轻',
+  2: '轻微',
+  3: '中等',
+  4: '严重',
+  5: '极重'
 }
 
 export const DISEASE_SEVERITY_COLORS: Record<DiseaseSeverity, string> = {
-  mild: '#22c55e',
-  moderate: '#f59e0b',
-  severe: '#ef4444'
+  1: '#22c55e',
+  2: '#84cc16',
+  3: '#f59e0b',
+  4: '#f97316',
+  5: '#ef4444'
 }
 
 export const DEFAULT_HISTORICAL_PERIODS: Omit<HistoricalPeriod, 'id'>[] = [

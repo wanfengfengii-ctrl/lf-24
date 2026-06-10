@@ -2,6 +2,7 @@
   <div class="disease-stats-panel">
     <div class="panel-header">
       <span class="panel-title">病害统计</span>
+      <n-tag size="small" type="info">仅统计可见病害</n-tag>
     </div>
 
     <div class="stats-content">
@@ -55,7 +56,7 @@
             <div class="bar-label">
               <span
                 class="color-dot"
-                :style="{ backgroundColor: getSeverityColor(stat.severity) }"
+                :style="{ backgroundColor: stat.color }"
               ></span>
               <span class="label-text">{{ stat.severityName }}</span>
               <span class="count-badge">{{ stat.count }}处</span>
@@ -65,7 +66,7 @@
                 class="bar-fill"
                 :style="{
                   width: `${stat.percentage}%`,
-                  backgroundColor: getSeverityColor(stat.severity)
+                  backgroundColor: stat.color
                 }"
               ></div>
             </div>
@@ -80,8 +81,8 @@
       <div class="summary-section">
         <n-space :size="16" justify="center">
           <div class="summary-card">
-            <div class="summary-value">{{ diseases.length }}</div>
-            <div class="summary-label">病害总数</div>
+            <div class="summary-value">{{ visibleDiseases.length }}</div>
+            <div class="summary-label">可见病害数</div>
           </div>
           <div class="summary-card">
             <div class="summary-value">{{ totalDiseaseArea }}</div>
@@ -95,22 +96,16 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { NSpace } from 'naive-ui'
+import { NSpace, NTag } from 'naive-ui'
 import { useDiseaseStore } from '../stores/disease'
-import { DISEASE_SEVERITY_COLORS } from '../types'
-import type { DiseaseSeverity } from '../types'
 
 const diseaseStore = useDiseaseStore()
 const {
-  diseases,
+  visibleDiseases,
   diseaseTypeStats,
   diseaseSeverityStats,
   totalDiseaseArea
 } = storeToRefs(diseaseStore)
-
-function getSeverityColor(severity: DiseaseSeverity): string {
-  return DISEASE_SEVERITY_COLORS[severity]
-}
 </script>
 
 <style scoped>
@@ -122,6 +117,9 @@ function getSeverityColor(severity: DiseaseSeverity): string {
 }
 
 .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;

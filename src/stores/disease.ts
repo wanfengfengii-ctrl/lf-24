@@ -12,7 +12,8 @@ import type {
 import {
   DISEASE_TYPE_LABELS,
   DISEASE_TYPE_COLORS,
-  DISEASE_SEVERITY_LABELS
+  DISEASE_SEVERITY_LABELS,
+  DISEASE_SEVERITY_COLORS
 } from '../types'
 import { useSolutionStore } from './solution'
 
@@ -79,9 +80,13 @@ export const useDiseaseStore = defineStore('disease', () => {
     return solutionStore.currentSolution?.diseases || []
   })
 
+  const visibleDiseases = computed(() => {
+    return diseases.value.filter(d => d.visible)
+  })
+
   const filteredDiseases = computed(() => {
-    return diseases.value.filter(d => {
-      if (filterType.value !== 'all' && d.type !== filterType.value) return false
+    return visibleDiseases.value.filter(d => {
+      if (filterType.value !== 'all' && !d.types.includes(filterType.value)) return false
       if (filterSeverity.value !== 'all' && d.severity !== filterSeverity.value) return false
       return true
     })
@@ -92,7 +97,7 @@ export const useDiseaseStore = defineStore('disease', () => {
   })
 
   const totalDiseaseArea = computed(() => {
-    return diseases.value.reduce((sum, d) => sum + d.area, 0)
+    return visibleDiseases.value.reduce((sum, d) => sum + d.area, 0)
   })
 
   const diseaseTypeStats = computed((): DiseaseTypeStat[] => {
@@ -103,15 +108,17 @@ export const useDiseaseStore = defineStore('disease', () => {
       stats.set(type, { count: 0, totalArea: 0 })
     })
 
-    for (const disease of diseases.value) {
-      const stat = stats.get(disease.type)
-      if (stat) {
-        stat.count++
-        stat.totalArea += disease.area
+    for (const disease of visibleDiseases.value) {
+      for (const type of disease.types) {
+        const stat = stats.get(type)
+        if (stat) {
+          stat.count++
+          stat.totalArea += disease.area
+        }
       }
     }
 
-    const totalArea = totalDiseaseArea.value
+    const typeTotalArea = Array.from(stats.values()).reduce((sum, s) => sum + s.totalArea, 0)
 
     return types.map(type => {
       const stat = stats.get(type)!
@@ -120,7 +127,7 @@ export const useDiseaseStore = defineStore('disease', () => {
         typeName: DISEASE_TYPE_LABELS[type],
         count: stat.count,
         totalArea: Math.round(stat.totalArea),
-        percentage: totalArea > 0 ? Math.round((stat.totalArea / totalArea) * 10000) / 100 : 0,
+        percentage: typeTotalArea > 0 ? Math.round((stat.totalArea / typeTotalArea) * 10000) / 100 : 0,
         color: DISEASE_TYPE_COLORS[type]
       }
     })
@@ -128,13 +135,13 @@ export const useDiseaseStore = defineStore('disease', () => {
 
   const diseaseSeverityStats = computed((): DiseaseSeverityStat[] => {
     const stats = new Map<DiseaseSeverity, { count: number; totalArea: number }>()
-    const severities: DiseaseSeverity[] = ['mild', 'moderate', 'severe']
+    const severities: DiseaseSeverity[] = [1, 2, 3, 4, 5]
 
     severities.forEach(severity => {
       stats.set(severity, { count: 0, totalArea: 0 })
     })
 
-    for (const disease of diseases.value) {
+    for (const disease of visibleDiseases.value) {
       const stat = stats.get(disease.severity)
       if (stat) {
         stat.count++
@@ -151,14 +158,16 @@ export const useDiseaseStore = defineStore('disease', () => {
         severityName: DISEASE_SEVERITY_LABELS[severity],
         count: stat.count,
         totalArea: Math.round(stat.totalArea),
-        percentage: totalArea > 0 ? Math.round((stat.totalArea / totalArea) * 10000) / 100 : 0
+        percentage: totalArea > 0 ? Math.round((stat.totalArea / totalArea) * 10000) / 100 : 0,
+        color: DISEASE_SEVERITY_COLORS[severity]
       }
     })
   })
 
   function addDisease(data: {
     name?: string
-    type: DiseaseType
+    types?: DiseaseType[]
+    primaryType: DiseaseType
     severity: DiseaseSeverity
     description?: string
     treatmentSuggestion?: string
@@ -169,11 +178,13 @@ export const useDiseaseStore = defineStore('disease', () => {
 
     const area = calculateArea(data.shapeType, data.points)
     const boundingBox = calculateBoundingBox(data.points)
+    const types = data.types && data.types.length > 0 ? data.types : [data.primaryType]
 
     const disease: DiseaseAnnotation = {
       id: generateId(),
-      name: data.name || `${DISEASE_TYPE_LABELS[data.type]} ${diseases.value.length + 1}`,
-      type: data.type,
+      name: data.name || `${DISEASE_TYPE_LABELS[data.primaryType]} ${diseases.value.length + 1}`,
+      types,
+      primaryType: data.primaryType,
       severity: data.severity,
       description: data.description || '',
       discoveredAt: Date.now(),
@@ -182,7 +193,8 @@ export const useDiseaseStore = defineStore('disease', () => {
       points: data.points,
       boundingBox,
       area: Math.round(area),
-      color: DISEASE_TYPE_COLORS[data.type]
+      color: DISEASE_TYPE_COLORS[data.primaryType],
+      visible: true
     }
 
     solutionStore.currentSolution.diseases.push(disease)
@@ -205,8 +217,15 @@ export const useDiseaseStore = defineStore('disease', () => {
       disease.boundingBox = calculateBoundingBox(points)
     }
 
-    if (updates.type) {
-      disease.color = DISEASE_TYPE_COLORS[updates.type]
+    if (updates.primaryType) {
+      disease.color = DISEASE_TYPE_COLORS[updates.primaryType]
+    }
+
+    if (updates.types && updates.types.length > 0 && !updates.primaryType) {
+      if (!updates.types.includes(disease.primaryType)) {
+        disease.primaryType = updates.types[0]
+        disease.color = DISEASE_TYPE_COLORS[updates.types[0]]
+      }
     }
 
     if (solutionStore.currentSolution) {
@@ -232,6 +251,33 @@ export const useDiseaseStore = defineStore('disease', () => {
     return true
   }
 
+  function toggleDiseaseVisible(diseaseId: string): boolean {
+    const disease = diseases.value.find(d => d.id === diseaseId)
+    if (!disease) return false
+
+    disease.visible = !disease.visible
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return true
+  }
+
+  function setAllDiseasesVisible(visible: boolean): boolean {
+    if (!solutionStore.currentSolution) return false
+
+    for (const disease of solutionStore.currentSolution.diseases) {
+      disease.visible = visible
+    }
+
+    if (solutionStore.currentSolution) {
+      solutionStore.currentSolution.updatedAt = Date.now()
+    }
+
+    return true
+  }
+
   function selectDisease(diseaseId: string | null) {
     selectedDiseaseId.value = diseaseId
   }
@@ -246,6 +292,7 @@ export const useDiseaseStore = defineStore('disease', () => {
 
   function setDiseaseVisible(visible: boolean) {
     diseaseVisible.value = visible
+    setAllDiseasesVisible(visible)
   }
 
   function startDrawing(shapeType: 'rect' | 'polygon' | 'freehand') {
@@ -258,7 +305,7 @@ export const useDiseaseStore = defineStore('disease', () => {
     drawingPoints.value.push(point)
   }
 
-  function finishDrawing(type: DiseaseType, severity: DiseaseSeverity, customPoints?: DiseasePoint[]): DiseaseAnnotation | null {
+  function finishDrawing(primaryType: DiseaseType, severity: DiseaseSeverity, customPoints?: DiseasePoint[], types?: DiseaseType[]): DiseaseAnnotation | null {
     const points = customPoints || drawingPoints.value
 
     if (points.length < 2) {
@@ -267,7 +314,8 @@ export const useDiseaseStore = defineStore('disease', () => {
     }
 
     const disease = addDisease({
-      type,
+      primaryType,
+      types: types || [primaryType],
       severity,
       shapeType: drawingShapeType.value,
       points: [...points]
@@ -290,11 +338,11 @@ export const useDiseaseStore = defineStore('disease', () => {
     return {
       solutionName: solutionStore.currentSolution.name,
       generatedAt: Date.now(),
-      totalDiseases: diseases.value.length,
+      totalDiseases: visibleDiseases.value.length,
       totalArea: Math.round(totalDiseaseArea.value),
       typeStats: diseaseTypeStats.value,
       severityStats: diseaseSeverityStats.value,
-      diseases: JSON.parse(JSON.stringify(diseases.value))
+      diseases: JSON.parse(JSON.stringify(visibleDiseases.value))
     }
   }
 
@@ -311,7 +359,7 @@ export const useDiseaseStore = defineStore('disease', () => {
     text += `========================\n\n`
     text += `方案名称: ${solutionStore.currentSolution.name}\n`
     text += `生成时间: ${new Date().toLocaleString('zh-CN')}\n`
-    text += `病害总数: ${diseases.value.length}\n`
+    text += `病害总数: ${visibleDiseases.value.length}\n`
     text += `病害总面积: ${Math.round(totalDiseaseArea.value)} 像素\n\n`
 
     text += `一、病害类型统计\n`
@@ -328,9 +376,10 @@ export const useDiseaseStore = defineStore('disease', () => {
 
     text += `\n三、病害明细\n`
     text += `------------\n`
-    diseases.value.forEach((d, index) => {
+    visibleDiseases.value.forEach((d, index) => {
       text += `\n${index + 1}. ${d.name}\n`
-      text += `   类型: ${DISEASE_TYPE_LABELS[d.type]}\n`
+      text += `   类型: ${d.types.map(t => DISEASE_TYPE_LABELS[t]).join('、')}\n`
+      text += `   主类型: ${DISEASE_TYPE_LABELS[d.primaryType]}\n`
       text += `   严重程度: ${DISEASE_SEVERITY_LABELS[d.severity]}\n`
       text += `   发现时间: ${new Date(d.discoveredAt).toLocaleString('zh-CN')}\n`
       text += `   面积: ${d.area} 像素\n`
@@ -358,6 +407,7 @@ export const useDiseaseStore = defineStore('disease', () => {
     drawingPoints,
     diseaseVisible,
     diseases,
+    visibleDiseases,
     filteredDiseases,
     selectedDisease,
     totalDiseaseArea,
@@ -366,6 +416,8 @@ export const useDiseaseStore = defineStore('disease', () => {
     addDisease,
     updateDisease,
     deleteDisease,
+    toggleDiseaseVisible,
+    setAllDiseasesVisible,
     selectDisease,
     setFilterType,
     setFilterSeverity,
