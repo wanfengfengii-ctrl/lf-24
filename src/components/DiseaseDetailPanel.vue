@@ -10,7 +10,7 @@
         </n-button>
         <span class="panel-title">病害详情</span>
       </div>
-      <n-tag :color="getStageColor(disease?.currentStage)" type="success" size="small">
+      <n-tag :style="{ backgroundColor: getStageColor(disease?.currentStage), color: '#fff' }" type="success" size="small">
         {{ getStageLabel(disease?.currentStage) }}
       </n-tag>
     </div>
@@ -70,7 +70,7 @@
             </div>
             <div class="info-item">
               <span class="info-label">处置状态</span>
-              <n-tag :color="getTreatmentStatusColor(disease.treatmentStatus)" size="small">
+              <n-tag :style="{ backgroundColor: getTreatmentStatusColor(disease.treatmentStatus), color: '#fff' }" size="small">
                 {{ getTreatmentStatusLabel(disease.treatmentStatus) }}
               </n-tag>
             </div>
@@ -290,7 +290,6 @@ import {
 import { storeToRefs } from 'pinia'
 import { useDiseaseStore } from '../stores/disease'
 import type {
-  DiseaseAnnotation,
   DiseaseStage,
   DiseaseStageRecord,
   TreatmentStatus,
@@ -318,6 +317,7 @@ const message = useMessage()
 
 const emit = defineEmits<{
   (e: 'back'): void
+  (e: 'edit'): void
 }>()
 
 const disease = computed(() => selectedDisease.value)

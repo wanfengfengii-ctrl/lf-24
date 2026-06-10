@@ -211,10 +211,10 @@
                 </span>
               </div>
               <div class="item-stage-info">
-                <n-tag size="tiny" :color="getStageColor(disease.currentStage)" :bordered="false">
+                <n-tag size="tiny" :style="{ backgroundColor: getStageColor(disease.currentStage), color: '#fff' }" :bordered="false">
                   {{ getStageLabel(disease.currentStage) }}
                 </n-tag>
-                <n-tag size="tiny" :color="getTreatmentStatusColor(disease.treatmentStatus)" :bordered="false">
+                <n-tag size="tiny" :style="{ backgroundColor: getTreatmentStatusColor(disease.treatmentStatus), color: '#fff' }" :bordered="false">
                   {{ getTreatmentStatusLabel(disease.treatmentStatus) }}
                 </n-tag>
                 <span class="record-count">{{ disease.stageRecords.length }}次记录</span>

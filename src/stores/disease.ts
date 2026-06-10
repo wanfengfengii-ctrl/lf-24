@@ -511,7 +511,6 @@ export const useDiseaseStore = defineStore('disease', () => {
     const index = disease.stageRecords.findIndex(r => r.id === recordId)
     if (index === -1) return false
 
-    const record = disease.stageRecords[index]
     disease.stageRecords.splice(index, 1)
 
     if (disease.stageRecords.length > 0) {
